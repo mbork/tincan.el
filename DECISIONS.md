@@ -67,3 +67,15 @@ Rationale: KISS resilience without inotify or extra dependencies; the newline
 rule is what actually guarantees we never parse incomplete JSON.  Speculative
 truncation handling was removed because it cannot occur in practice and a
 half-correct version (it missed in-place larger rewrites) is worse than none.
+
+### D11 - `--show-sessions`
+Lists only the *current* project's sessions, i.e. those whose `cwd` field
+equals the process working directory (matching `claude --resume`).  Output is
+tab-separated `id<TAB>timestamp<TAB>title`, one per line, newest first.
+The title is the `aiTitle` if present, else the first user prompt (collapsed to
+one line and truncated), else the session id.  Timestamps are the first
+record's timestamp, shown in local time as ISO-8601 with offset.
+Rationale: the id is needed so the caller (Emacs) can pick a session; tabs make
+parsing trivial; restricting to the current project is the relevant set for
+driving Claude Code from a project buffer.  Each file is fully scanned because
+`aiTitle` can appear late; acceptable for the expected handful of sessions.

@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # * Configuration
@@ -204,6 +205,63 @@ def follow_transcript(path):
                 transcript.seek(position)
                 time.sleep(POLL_INTERVAL_SECONDS)
 
+# * Session listing
+# ** Metadata extraction
+def read_session_meta(path):
+    cwd = None
+    title = None
+    timestamp = None
+    first_prompt = None
+    with open(path, encoding="utf-8", errors="replace") as transcript:
+        for line in transcript:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if cwd is None and record.get("cwd"):
+                cwd = record["cwd"]
+            if timestamp is None and record.get("timestamp"):
+                timestamp = record["timestamp"]
+            if record.get("type") == "ai-title" and record.get("aiTitle"):
+                title = record["aiTitle"]
+            if first_prompt is None and record.get("type") == "user":
+                content = get_content(record)
+                if isinstance(content, str) and content.strip():
+                    first_prompt = content.strip()
+    if not title:
+        title = first_prompt or path.stem
+    return {"id": path.stem, "cwd": cwd, "title": title, "timestamp": timestamp}
+
+# ** Formatting
+def format_timestamp(timestamp):
+    if not timestamp:
+        return "?"
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return timestamp
+    return parsed.astimezone().isoformat(timespec="seconds")
+
+def oneline(text, limit=70):
+    flattened = " ".join(text.split())
+    if len(flattened) > limit:
+        return flattened[:limit - 3] + "..."
+    return flattened
+
+# ** Listing
+def show_sessions():
+    here = os.getcwd()
+    metas = [read_session_meta(path) for path in iter_session_files()]
+    mine = [meta for meta in metas if meta["cwd"] == here]
+    mine.sort(key=lambda meta: meta["timestamp"] or "", reverse=True)
+    for meta in mine:
+        line = "{}\t{}\t{}\n".format(
+            meta["id"], format_timestamp(meta["timestamp"]), oneline(meta["title"]))
+        emit(line)
+
 # * Command-line interface
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -214,13 +272,19 @@ def build_parser():
     parser.add_argument(
         "-f", "--follow", action="store_true",
         help="keep watching the session and append new output (like tail -f)")
+    parser.add_argument(
+        "--show-sessions", action="store_true",
+        help="list this project's sessions (id, timestamp, title) and exit")
     return parser
 
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.show_sessions:
+        show_sessions()
+        return
     if not args.session:
-        parser.error("a session id is required")
+        parser.error("a session id is required (or use --show-sessions)")
     path = resolve_session_file(args.session)
     if args.follow:
         follow_transcript(path)
