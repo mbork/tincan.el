@@ -93,6 +93,18 @@ If a function symbol, call it as the major mode when it is `fboundp'
                  (function :tag "Specific Markdown mode"))
   :group 'tincan)
 
+(defcustom tincan-fontify-code-blocks-natively t
+  "If non-nil, fontify fenced code blocks with each language's major mode.
+Only has an effect when a Markdown mode is used (see `tincan-markdown-mode'):
+it sets `markdown-fontify-code-blocks-natively' buffer-locally.  Turning this
+off avoids loading language major modes, which can matter for a large,
+continuously tailed transcript."
+  :type 'boolean
+  :group 'tincan)
+
+;; Declared by markdown-mode; forward declaration keeps the byte-compiler quiet.
+(defvar markdown-fontify-code-blocks-natively)
+
 (defun tincan--markdown-mode-symbol ()
   "Return the Markdown major-mode symbol to use, or nil.
 Honors `tincan-markdown-mode' and only returns a mode that is `fboundp'."
@@ -117,6 +129,8 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
     (if markdown-mode-symbol
         (progn
           (funcall markdown-mode-symbol)
+          (setq-local markdown-fontify-code-blocks-natively
+                      tincan-fontify-code-blocks-natively)
           (font-lock-add-keywords nil tincan-font-lock-keywords 'append)
           (setq buffer-read-only t)
           (font-lock-flush))

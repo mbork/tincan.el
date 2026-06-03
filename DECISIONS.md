@@ -121,6 +121,16 @@ Auto-detection prefers the editing modes (markup visible, fontified) over the
 view modes so exact code/markup stays readable in a transcript; users who want
 the rendered look can set `tincan-markdown-mode` to `gfm-view-mode`.
 
+### D17 - Native code-block fontification on by default
+When a Markdown mode is used, `tincan-render-buffer` sets
+`markdown-fontify-code-blocks-natively' buffer-locally so fenced code blocks are
+highlighted with each language's own major mode.  This is gated by the
+`tincan-fontify-code-blocks-natively' defcustom (default t).
+Rationale: agentic-coding transcripts are code-heavy, so per-language
+highlighting is worth a lot; the opt-out exists because native fontification
+loads language major modes, which can add overhead on a large, continuously
+tailed buffer.
+
 ## Revisited decisions
 
 ### D15 - Polling, not inotify, for follow mode (revisits D10)
