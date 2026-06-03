@@ -79,3 +79,27 @@ Rationale: the id is needed so the caller (Emacs) can pick a session; tabs make
 parsing trivial; restricting to the current project is the relevant set for
 driving Claude Code from a project buffer.  Each file is fully scanned because
 `aiTitle` can appear late; acceptable for the expected handful of sessions.
+
+## Emacs view mode
+
+### D12 - Single `tincan.el` with the standard package skeleton
+All Emacs code lives in one `tincan.el` (header, Commentary, Code, footer).
+Outli sections use `;; *` / `;; **` within the Code section; the conventional
+`;;; Commentary:` / `;;; Code:` lines do not clash with that pattern.
+Rationale: KISS for a small package; the view mode, future input mode, and
+orchestration command are all small and naturally cohabit one file.
+
+### D13 - `tincan-view-mode` derives from `special-mode`
+Rationale: it is a read-only viewer, and `special-mode` provides read-only
+buffers plus convenient keys (q, g, SPC, n/p).  It stays compatible with
+`auto-revert-tail-mode`, which binds `inhibit-read-only` when appending, so the
+buffer can still follow the growing transcript.  The mode handles display only;
+launching the tail and turning on auto-revert is the orchestration's job.
+
+### D14 - Font-lock only the `@@@ ROLE` marker lines
+Five customizable faces (`tincan-user`, `tincan-assistant`, `tincan-thinking`,
+`tincan-tool-use`, `tincan-tool-result`) inherit from theme font-lock faces and
+are applied to the whole marker line; `font-lock-defaults` is keywords-only (no
+syntactic fontification).  Block bodies are not fontified in the MVP.
+Rationale: matches the "very simple" brief, looks reasonable in any theme, and
+keeps the marker contract with tincan-tail.py explicit in one `defvar`.
