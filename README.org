@@ -1,0 +1,9 @@
+#+TITLE: tincan.el - a hackish take on agentic coding in Emacs
+#+AUTHOR: Marcin 'mbork' Borkowski
+
+This is a small tool to drive Claude Code from Emacs via tmux.  It consists of a few parts:
+1. A Python script which takes an ongoing conversation with Claude Code and appends it to a plain text file (watchable with =tail -f= or =auto-revert-tail-mode=).
+2. A very simple Emacs mode to show that conversation with font-locking.
+3. A slightly more complex Emacs mode to gather the user's responses and send them back to Claude Code.
+4. A set of Claude Code hooks to tell Emacs whether it's working or idle.
+5. An Emacs command orchestrating all previous parts.
