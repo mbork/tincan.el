@@ -152,3 +152,17 @@ If latency ever feels laggy, the cheap first move is lowering
 `POLL_INTERVAL_SECONDS` (e.g. to 0.1) - portable, one line, no deps.
 Reserve inotify for the case where profiling shows polling is a real problem,
 which for a transcript viewer it should not be.
+
+### D18 - Fence TOOL_USE and TOOL_RESULT bodies (extends D7)
+TOOL_USE bodies are wrapped in a ```json fenced code block and TOOL_RESULT
+bodies in a plain (language-less) fence, so a Markdown view renders them as
+code (and, with D17, highlights the JSON natively).  `format_block` grew a
+`lang` argument: `None` renders the body as-is (USER/ASSISTANT/THINKING stay
+prose Markdown), any string fences it.  The fence length is one backtick longer
+than the longest backtick run inside the body (minimum three), per the
+CommonMark rule, so embedded backticks/fences cannot close the block early.
+Tool-result errors are flagged on the marker line (`@@@ TOOL_RESULT (error)`)
+rather than inside the fenced body, keeping the body verbatim.
+Rationale: tool I/O is data/code, not prose, so it should be monospaced and not
+interpreted as Markdown; only these two block kinds are fenced because the
+others are genuinely prose.

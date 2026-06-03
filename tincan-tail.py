@@ -71,11 +71,32 @@ def resolve_session_file(session_arg):
 
 # * Rendering
 # ** Block formatting
-def format_block(header, body):
+def longest_backtick_run(text):
+    longest = 0
+    current = 0
+    for character in text:
+        if character == "`":
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return longest
+
+def fence_body(body, lang):
+    # Use a fence longer than any backtick run inside BODY so embedded
+    # backticks or fences cannot terminate the block early (CommonMark rule).
+    fence = "`" * max(3, longest_backtick_run(body) + 1)
+    return fence + lang + "\n" + body + "\n" + fence
+
+def format_block(header, body, lang=None):
     body = body.strip("\n")
     if not body.strip():
         # Skip empty blocks (e.g. thinking whose text was not persisted).
         return None
+    # LANG=None means render the body as-is; any string fences it (the empty
+    # string makes a plain, language-less code block).
+    if lang is not None:
+        body = fence_body(body, lang)
     return header + "\n" + body + "\n\n"
 
 def get_content(record):
@@ -92,7 +113,7 @@ def render_tool_use(block):
         body = ""
     else:
         body = json.dumps(tool_input, indent=2, ensure_ascii=False)
-    return format_block(ROLE_TOOL_USE + " " + name, body)
+    return format_block(ROLE_TOOL_USE + " " + name, body, lang="json")
 
 def render_tool_result(block):
     content = block.get("content")
@@ -104,9 +125,11 @@ def render_tool_result(block):
         body = "\n".join(texts)
     else:
         body = ""
+    header = ROLE_TOOL_RESULT
     if block.get("is_error"):
-        body = "[error]\n" + body
-    return format_block(ROLE_TOOL_RESULT, body)
+        # Mark errors on the marker line, not inside the fenced body.
+        header = ROLE_TOOL_RESULT + " (error)"
+    return format_block(header, body, lang="")
 
 # ** User and assistant records
 def render_user_block(block):
