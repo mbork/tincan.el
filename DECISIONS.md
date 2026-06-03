@@ -56,3 +56,14 @@ All diagnostics go to stderr.  `BrokenPipeError` (downstream reader closed) and
 `KeyboardInterrupt` exit quietly.
 Rationale: a downstream `tail -f`/`auto-revert-tail-mode` must see a clean,
 append-only stream.
+
+### D10 - Follow mode
+`--follow`/`-f` drains the file, then polls every 0.25 s using a plain read
+offset.  Only newline-terminated lines are processed, so a half-written record
+is never parsed; `handle_line` additionally swallows JSON errors.
+We assume session files are append-only (Claude Code never truncates or
+rewrites them), so there is no rotation/truncation handling.
+Rationale: KISS resilience without inotify or extra dependencies; the newline
+rule is what actually guarantees we never parse incomplete JSON.  Speculative
+truncation handling was removed because it cannot occur in practice and a
+half-correct version (it missed in-place larger rewrites) is worse than none.

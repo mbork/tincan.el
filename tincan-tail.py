@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 # * Configuration
@@ -18,6 +19,9 @@ ROLE_ASSISTANT = "@@@ ASSISTANT"
 ROLE_THINKING = "@@@ THINKING"
 ROLE_TOOL_USE = "@@@ TOOL_USE"
 ROLE_TOOL_RESULT = "@@@ TOOL_RESULT"
+
+# ** Polling
+POLL_INTERVAL_SECONDS = 0.25
 
 # * Output helpers
 def emit(text):
@@ -182,13 +186,34 @@ def print_transcript(path):
         for line in transcript:
             handle_line(line)
 
+# * Follow mode
+def follow_transcript(path):
+    # Drain the current contents, then poll for newly appended whole lines.
+    # Claude Code session files are append-only, so a simple read offset is
+    # enough.  Only newline-terminated lines are processed, so a partially
+    # written record is never parsed; handle_line additionally tolerates bad
+    # JSON.
+    with open(path, encoding="utf-8", errors="replace") as transcript:
+        while True:
+            position = transcript.tell()
+            line = transcript.readline()
+            if line.endswith("\n"):
+                handle_line(line)
+            else:
+                # No complete line yet (partial write or EOF): rewind and wait.
+                transcript.seek(position)
+                time.sleep(POLL_INTERVAL_SECONDS)
+
 # * Command-line interface
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Print a Claude Code session transcript as plain text.")
+        description="Print or follow a Claude Code session transcript as plain text.")
     parser.add_argument(
         "session", nargs="?",
         help="session id, unique id prefix, or path to a .jsonl transcript")
+    parser.add_argument(
+        "-f", "--follow", action="store_true",
+        help="keep watching the session and append new output (like tail -f)")
     return parser
 
 def main():
@@ -197,7 +222,10 @@ def main():
     if not args.session:
         parser.error("a session id is required")
     path = resolve_session_file(args.session)
-    print_transcript(path)
+    if args.follow:
+        follow_transcript(path)
+    else:
+        print_transcript(path)
 
 # * Entry point
 if __name__ == "__main__":
