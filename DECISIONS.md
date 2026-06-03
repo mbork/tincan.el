@@ -104,6 +104,23 @@ syntactic fontification).  Block bodies are not fontified in the MVP.
 Rationale: matches the "very simple" brief, looks reasonable in any theme, and
 keeps the marker contract with tincan-tail.py explicit in one `defvar`.
 
+### D16 - Markdown rendering via a runtime dispatcher
+Transcript bodies are Markdown (Claude's output), so `tincan-render-buffer`
+activates a Markdown major mode when available and layers the `@@@ ROLE` markers
+on top with `font-lock-add-keywords`; the marker keywords carry the OVERRIDE
+flag so they always win over Markdown's own fontification.  `tincan-view-mode`
+(from D13) becomes the plain fallback used when no Markdown mode is available.
+Mode choice is controlled by `tincan-markdown-mode` (t = auto-detect
+`gfm-mode`/`markdown-mode`; nil = disabled; a function symbol = that mode, e.g.
+`gfm-view-mode`).  The buffer is forced read-only in every case.
+Rationale: a runtime dispatcher (rather than `define-derived-mode` with a
+Markdown parent) is needed because `define-derived-mode` fixes its parent at
+macro-expansion time, which byte-compilation would freeze to whatever was
+available when compiled - the wrong choice if Markdown is installed later.
+Auto-detection prefers the editing modes (markup visible, fontified) over the
+view modes so exact code/markup stays readable in a transcript; users who want
+the rendered look can set `tincan-markdown-mode` to `gfm-view-mode`.
+
 ## Revisited decisions
 
 ### D15 - Polling, not inotify, for follow mode (revisits D10)
