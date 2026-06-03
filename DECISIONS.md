@@ -103,3 +103,25 @@ are applied to the whole marker line; `font-lock-defaults` is keywords-only (no
 syntactic fontification).  Block bodies are not fontified in the MVP.
 Rationale: matches the "very simple" brief, looks reasonable in any theme, and
 keeps the marker contract with tincan-tail.py explicit in one `defvar`.
+
+## Revisited decisions
+
+### D15 - Polling, not inotify, for follow mode (revisits D10)
+Follow mode keeps the 0.25 s polling loop instead of switching to inotify.
+inotify would only replace the wait step (the offset tracking, the
+newline-complete-line rule, and the JSON resilience are all independent of how
+we wait), so it changes little of substance, while it costs:
+- A dependency: Python's stdlib has no inotify module, so it means a new
+  dependency (`inotify_simple`/`pyinotify`/`watchdog`) or ~30-40 lines of
+  `ctypes` against libc.
+- Portability: inotify is Linux-only, so it would not replace polling but add a
+  Linux-only fast path that still needs the polling loop as a fallback.
+- Extra edge cases: a setup race (must drain to EOF after arming the watch,
+  with a timeout as a safety net) and, for full robustness, watching the
+  directory rather than the file inode.
+The benefit is marginal: at most ~250 ms less latency and a few trivial reads
+per second saved on an idle, human-facing viewer.
+If latency ever feels laggy, the cheap first move is lowering
+`POLL_INTERVAL_SECONDS` (e.g. to 0.1) - portable, one line, no deps.
+Reserve inotify for the case where profiling shows polling is a real problem,
+which for a transcript viewer it should not be.
