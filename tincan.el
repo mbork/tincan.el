@@ -56,6 +56,11 @@
   "Face for the \"@@@ TOOL_RESULT\" marker line."
   :group 'tincan)
 
+(defface tincan-done
+  '((t :inherit success :weight bold))
+  "Face for the \"@@@ DONE\" marker line that ends a turn."
+  :group 'tincan)
+
 ;; * Font lock
 ;; The markers below must stay in sync with tincan-tail.py's ROLE_* constants.
 (defvar tincan-font-lock-keywords
@@ -63,7 +68,8 @@
     ("^@@@ ASSISTANT.*$" 0 'tincan-assistant t)
     ("^@@@ THINKING.*$" 0 'tincan-thinking t)
     ("^@@@ TOOL_USE.*$" 0 'tincan-tool-use t)
-    ("^@@@ TOOL_RESULT.*$" 0 'tincan-tool-result t))
+    ("^@@@ TOOL_RESULT.*$" 0 'tincan-tool-result t)
+    ("^@@@ DONE.*$" 0 'tincan-done t))
   "Font-lock keywords highlighting the \"@@@ ROLE\" section markers.
 Used directly by `tincan-view-mode' and added on top of Markdown
 fontification by `tincan-render-buffer'.  The trailing OVERRIDE flag makes the
@@ -77,8 +83,8 @@ marker faces win even when a Markdown mode has already fontified the line.")
 Used by `tincan-render-buffer' when no Markdown mode is available.  The buffer
 is read-only; new content is expected to arrive via `auto-revert-tail-mode'.
 Section markers of the form \"@@@ ROLE\" are font-locked according to the
-`tincan-user', `tincan-assistant', `tincan-thinking', `tincan-tool-use' and
-`tincan-tool-result' faces."
+`tincan-user', `tincan-assistant', `tincan-thinking', `tincan-tool-use',
+`tincan-tool-result' and `tincan-done' faces."
   (setq-local font-lock-defaults '(tincan-font-lock-keywords t)))
 
 ;; * Rendering

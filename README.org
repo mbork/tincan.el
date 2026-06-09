@@ -76,7 +76,10 @@ viewer together with tail-following:
 =gfm-mode=) when available - including native, per-language fontification of
 fenced code blocks - and otherwise falls back to the plain =tincan-view-mode=.
 Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
-=TOOL_USE=, =TOOL_RESULT=) are font-locked and the buffer is read-only.
+=TOOL_USE=, =TOOL_RESULT=, and =DONE=) are font-locked and the buffer is
+read-only.  A =@@@ DONE (32s)= line marks the end of a turn (derived from
+Claude Code's =turn_duration= record); a later part will use it to tell when
+the agent has finished.
 
 Relevant options (=M-x customize-group RET tincan RET=):
 - =tincan-markdown-mode= - which Markdown mode to use, or =nil= to disable it.

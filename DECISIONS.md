@@ -166,3 +166,22 @@ rather than inside the fenced body, keeping the body verbatim.
 Rationale: tool I/O is data/code, not prose, so it should be monospaced and not
 interpreted as Markdown; only these two block kinds are fenced because the
 others are genuinely prose.
+
+### D19 - Render turn_duration as `@@@ DONE`, for transcript-based completion
+A `system` record with `subtype: turn_duration` is rendered as a standalone
+`@@@ DONE (Ns)` marker (seconds rounded from `durationMs`); the Emacs side adds
+a matching `tincan-done` face.  This is also the planned signal for detecting
+that the agent has finished a turn, in place of Claude Code Stop hooks.
+The transcript carries `turn_duration` exactly once at the true end of each
+turn, immediately after the final `assistant` message - strictly better than
+`stop_reason: end_turn`, which can occur twice within one turn.  Detecting
+completion from the transcript reuses the single channel the follower already
+streams, so no `settings.json` hook setup is needed.
+Known limitations (to be covered later): abnormal endings (interrupt, crash,
+API error) emit no `turn_duration`, so a manual escape hatch
+(`tincan-unblock-agent-manually`) will be provided; and a mid-turn pause for a
+permission prompt looks like "working" (no `turn_duration` yet), which is the
+one case a `Notification` hook would handle better - it can be added narrowly
+if it proves annoying.
+The literal TUI string ("Cooked for Ns", with a randomized verb) is not stored
+in the transcript and is deliberately not reproduced; only the duration is.

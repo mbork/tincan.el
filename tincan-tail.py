@@ -20,6 +20,7 @@ ROLE_ASSISTANT = "@@@ ASSISTANT"
 ROLE_THINKING = "@@@ THINKING"
 ROLE_TOOL_USE = "@@@ TOOL_USE"
 ROLE_TOOL_RESULT = "@@@ TOOL_RESULT"
+ROLE_DONE = "@@@ DONE"
 
 # ** Polling
 POLL_INTERVAL_SECONDS = 0.25
@@ -178,6 +179,16 @@ def render_assistant(record):
                 parts.append(rendered)
     return "".join(parts) if parts else None
 
+# ** System records
+def render_system(record):
+    # A "turn_duration" system record is emitted exactly once at the end of a
+    # turn; render it as a standalone marker so Emacs can both show it and use
+    # it to tell that the agent has finished.
+    if record.get("subtype") == "turn_duration":
+        seconds = round(record.get("durationMs", 0) / 1000)
+        return "{} ({}s)\n\n".format(ROLE_DONE, seconds)
+    return None
+
 # ** Record dispatch
 def render_record(record):
     record_type = record.get("type")
@@ -185,6 +196,8 @@ def render_record(record):
         return render_user(record)
     if record_type == "assistant":
         return render_assistant(record)
+    if record_type == "system":
+        return render_system(record)
     return None
 
 def emit_record(record):
