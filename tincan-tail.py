@@ -330,7 +330,10 @@ def run_notification_hook():
 
 # ** Installing the hook into settings.json
 def default_settings_path():
-    return get_config_dir() / "settings.json"
+    # Project-local, personal (typically gitignored) settings, resolved against
+    # the working directory - the same place Claude Code reads project settings,
+    # so the hook fires only for this project's sessions.
+    return Path.cwd() / ".claude" / "settings.local.json"
 
 def hook_command():
     # The command Claude Code runs on a Notification event: python3 plus this
@@ -437,7 +440,7 @@ def build_parser():
         help="exit 0 if the Notification hook is installed, 1 otherwise")
     parser.add_argument(
         "--settings-file", metavar="PATH",
-        help="settings.json to manage (default: <config-dir>/settings.json)")
+        help="settings file to manage (default: .claude/settings.local.json in the cwd)")
     return parser
 
 def main():

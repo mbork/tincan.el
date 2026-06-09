@@ -163,7 +163,7 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
 (defcustom tincan-hook-settings-file nil
   "Settings file the Notification hook is installed into.
 When nil, tincan-tail.py uses its own default,
-\"<config-dir>/settings.json\" (honoring CLAUDE_CONFIG_DIR)."
+\".claude/settings.local.json\" relative to the working directory."
   :type '(choice (const :tag "Script default" nil) file)
   :group 'tincan)
 

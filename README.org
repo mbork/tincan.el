@@ -110,8 +110,10 @@ also be driven directly:
 ./tincan-tail.py --install-hook      # also --uninstall-hook, --check-hook
 #+end_src
 
-The script edits =<config-dir>/settings.json= (i.e. =~/.claude/settings.json=,
-honoring =CLAUDE_CONFIG_DIR=; override with =--settings-file=, or in Emacs with
-=tincan-hook-settings-file=).  It backs the file up to =settings.json.bak= and
-keeps any existing settings and hooks.  Because Claude Code reviews hook changes
-for safety, restart it or run =/hooks= afterwards so the hook is loaded.
+By default the script edits =.claude/settings.local.json= in the current
+directory - your personal, gitignored project settings, so the hook fires only
+for this project's sessions.  Run install from where you start Claude Code, or
+override with =--settings-file= (or, in Emacs, =tincan-hook-settings-file=).  It
+backs the file up to =settings.local.json.bak= and keeps any existing settings
+and hooks.  Because Claude Code reviews hook changes for safety, restart it or
+run =/hooks= afterwards so the hook is loaded.

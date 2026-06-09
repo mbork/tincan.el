@@ -197,7 +197,11 @@ writes the message to a small per-session file at
 coupling.
 Installation lives in the Python script too: `--install-hook`,
 `--uninstall-hook`, `--check-hook` (the last exits 0/1), with an optional
-`--settings-file` (default `<config-dir>/settings.json`).  They load the JSON,
+`--settings-file`.  The default target is `.claude/settings.local.json`
+resolved against the working directory - Claude Code's personal, gitignored
+project settings - so the hook fires only for the project you drive with tincan
+and is never committed; install from where you start Claude Code, or pass
+`--settings-file`.  They load the JSON,
 back it up to `.bak`, merge in (or remove) our hook, prune empty containers, and
 write it back with `json.dumps(indent=2)`.  Emacs only provides thin wrappers
 (`tincan-install-hook`, `tincan-uninstall-hook`, `tincan-hook-installed-p`) that
