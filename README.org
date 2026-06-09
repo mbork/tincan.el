@@ -84,3 +84,34 @@ the agent has finished.
 Relevant options (=M-x customize-group RET tincan RET=):
 - =tincan-markdown-mode= - which Markdown mode to use, or =nil= to disable it.
 - =tincan-fontify-code-blocks-natively= - per-language code-block highlighting.
+
+** Knowing when Claude wants your input (optional)
+
+When Claude pauses for a tool-permission prompt (or sits idle waiting for a
+prompt), nothing is written to the transcript - that prompt is terminal-only
+UI - so the viewer cannot show it on its own.  To surface it, tincan can install
+an optional Claude Code =Notification= hook that writes a small per-session file
+at =<config-dir>/tincan/<session-id>.notify=; a later part of tincan will watch
+that file and show the state.  The hook only signals that Claude wants you - you
+still answer the prompt in the terminal.
+
+Install (and uninstall) it from Emacs:
+
+#+begin_src emacs-lisp
+(tincan-install-hook)    ; M-x tincan-install-hook
+(tincan-hook-installed-p)
+(tincan-uninstall-hook)
+#+end_src
+
+These are thin wrappers around the script, which does the actual work and can
+also be driven directly:
+
+#+begin_src sh
+./tincan-tail.py --install-hook      # also --uninstall-hook, --check-hook
+#+end_src
+
+The script edits =<config-dir>/settings.json= (i.e. =~/.claude/settings.json=,
+honoring =CLAUDE_CONFIG_DIR=; override with =--settings-file=, or in Emacs with
+=tincan-hook-settings-file=).  It backs the file up to =settings.json.bak= and
+keeps any existing settings and hooks.  Because Claude Code reviews hook changes
+for safety, restart it or run =/hooks= afterwards so the hook is loaded.

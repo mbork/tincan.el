@@ -7,6 +7,8 @@
 import argparse
 import json
 import os
+import shlex
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -298,6 +300,116 @@ def show_sessions():
             meta["id"], format_timestamp(meta["timestamp"]), oneline(meta["title"]))
         emit(line)
 
+# * Notification hook
+# ** Status file written by the hook
+def get_tincan_state_dir():
+    return get_config_dir() / "tincan"
+
+def notify_status_path(session_id):
+    return get_tincan_state_dir() / (session_id + ".notify")
+
+def run_notification_hook():
+    # Invoked as a Claude Code "Notification" hook; the event JSON arrives on
+    # stdin.  Write the message to a small per-session file so Emacs can show
+    # that Claude is waiting for input.  Must never disrupt Claude Code, so any
+    # problem is swallowed silently.
+    try:
+        event = json.loads(sys.stdin.read())
+    except (ValueError, OSError):
+        return
+    session_id = event.get("session_id")
+    if not session_id:
+        return
+    message = event.get("message") or "Claude needs your input"
+    try:
+        path = notify_status_path(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(message + "\n", encoding="utf-8")
+    except OSError:
+        return
+
+# ** Installing the hook into settings.json
+def default_settings_path():
+    return get_config_dir() / "settings.json"
+
+def hook_command():
+    # The command Claude Code runs on a Notification event: python3 plus this
+    # script's own absolute path, so it does not depend on the executable bit.
+    script = os.path.realpath(__file__)
+    return "python3 {} --notification-hook".format(shlex.quote(script))
+
+def load_settings(path):
+    if not path.exists():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    if not text.strip():
+        return {}
+    return json.loads(text)
+
+def save_settings(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(data, indent=2, ensure_ascii=False)
+    path.write_text(serialized + "\n", encoding="utf-8")
+
+def backup_settings(path):
+    if path.exists():
+        shutil.copyfile(path, str(path) + ".bak")
+
+def notification_commands(data):
+    groups = data.get("hooks", {}).get("Notification", [])
+    commands = []
+    for group in groups:
+        for hook in group.get("hooks", []):
+            command = hook.get("command")
+            if command:
+                commands.append(command)
+    return commands
+
+def install_hook(settings_path):
+    data = load_settings(settings_path)
+    command = hook_command()
+    if command in notification_commands(data):
+        print("tincan: Notification hook already installed in {}".format(settings_path))
+        return 0
+    backup_settings(settings_path)
+    hooks = data.setdefault("hooks", {})
+    notifications = hooks.setdefault("Notification", [])
+    notifications.append({"matcher": "", "hooks": [{"type": "command", "command": command}]})
+    save_settings(settings_path, data)
+    print("tincan: installed Notification hook in {} - "
+          "restart Claude Code or run /hooks to load it".format(settings_path))
+    return 0
+
+def uninstall_hook(settings_path):
+    data = load_settings(settings_path)
+    command = hook_command()
+    if command not in notification_commands(data):
+        print("tincan: Notification hook not present in {}".format(settings_path))
+        return 0
+    backup_settings(settings_path)
+    hooks = data.get("hooks", {})
+    groups = hooks.get("Notification", [])
+    kept = [group for group in groups
+            if not any(hook.get("command") == command for hook in group.get("hooks", []))]
+    # Prune empty containers so an install/uninstall cycle round-trips cleanly.
+    if kept:
+        hooks["Notification"] = kept
+    else:
+        hooks.pop("Notification", None)
+    if not hooks:
+        data.pop("hooks", None)
+    save_settings(settings_path, data)
+    print("tincan: removed Notification hook from {}".format(settings_path))
+    return 0
+
+def check_hook(settings_path):
+    data = load_settings(settings_path)
+    if hook_command() in notification_commands(data):
+        print("installed")
+        return 0
+    print("not installed")
+    return 1
+
 # * Command-line interface
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -311,11 +423,39 @@ def build_parser():
     parser.add_argument(
         "--show-sessions", action="store_true",
         help="list this project's sessions (id, timestamp, title) and exit")
+    parser.add_argument(
+        "--notification-hook", action="store_true",
+        help="run as a Claude Code Notification hook (reads event JSON on stdin)")
+    parser.add_argument(
+        "--install-hook", action="store_true",
+        help="install the Notification hook into the settings file and exit")
+    parser.add_argument(
+        "--uninstall-hook", action="store_true",
+        help="remove the Notification hook from the settings file and exit")
+    parser.add_argument(
+        "--check-hook", action="store_true",
+        help="exit 0 if the Notification hook is installed, 1 otherwise")
+    parser.add_argument(
+        "--settings-file", metavar="PATH",
+        help="settings.json to manage (default: <config-dir>/settings.json)")
     return parser
 
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.notification_hook:
+        run_notification_hook()
+        return
+    if args.install_hook or args.uninstall_hook or args.check_hook:
+        if args.settings_file:
+            settings_path = Path(args.settings_file)
+        else:
+            settings_path = default_settings_path()
+        if args.install_hook:
+            sys.exit(install_hook(settings_path))
+        if args.uninstall_hook:
+            sys.exit(uninstall_hook(settings_path))
+        sys.exit(check_hook(settings_path))
     if args.show_sessions:
         show_sessions()
         return

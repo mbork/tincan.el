@@ -142,6 +142,66 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
           (font-lock-flush))
       (tincan-view-mode))))
 
+;; * Notification hook
+;; Optional integration: a Claude Code "Notification" hook runs tincan-tail.py,
+;; which writes a small per-session file when Claude is waiting for input (e.g.
+;; a tool-permission prompt).  All settings.json editing is done by the Python
+;; script, so the installed command and its paths have a single source of truth;
+;; the commands below are thin wrappers around it.  Installing is opt-in and only
+;; signals "Claude wants you" - it does not handle tool selection.
+
+(defconst tincan--directory
+  (file-name-directory (or load-file-name buffer-file-name default-directory))
+  "Directory containing tincan.el, used to locate tincan-tail.py.")
+
+(defcustom tincan-hook-script
+  (expand-file-name "tincan-tail.py" tincan--directory)
+  "Path to tincan-tail.py, which manages and runs the Notification hook."
+  :type 'file
+  :group 'tincan)
+
+(defcustom tincan-hook-settings-file nil
+  "Settings file the Notification hook is installed into.
+When nil, tincan-tail.py uses its own default,
+\"<config-dir>/settings.json\" (honoring CLAUDE_CONFIG_DIR)."
+  :type '(choice (const :tag "Script default" nil) file)
+  :group 'tincan)
+
+(defun tincan--run-hook-script (subcommand)
+  "Run tincan-tail.py with SUBCOMMAND, echo its output, return its exit code."
+  (let ((args (if tincan-hook-settings-file
+                  (list subcommand "--settings-file" tincan-hook-settings-file)
+                (list subcommand))))
+    (with-temp-buffer
+      (let* ((code (apply #'call-process "python3" nil t nil
+                          tincan-hook-script args))
+             (output (string-trim (buffer-string))))
+        (unless (string-empty-p output)
+          (message "%s" output))
+        code))))
+
+;;;###autoload
+(defun tincan-install-hook ()
+  "Install tincan's Notification hook (via tincan-tail.py).
+Installing is optional; tincan works without it.  The script backs up the
+settings file first.  Afterwards, restart Claude Code or run /hooks so the
+change is reviewed and loaded."
+  (interactive)
+  (tincan--run-hook-script "--install-hook"))
+
+;;;###autoload
+(defun tincan-uninstall-hook ()
+  "Remove tincan's Notification hook (via tincan-tail.py)."
+  (interactive)
+  (tincan--run-hook-script "--uninstall-hook"))
+
+;;;###autoload
+(defun tincan-hook-installed-p ()
+  "Return non-nil if tincan's Notification hook is installed.
+Interactively, report the result in the echo area."
+  (interactive)
+  (= 0 (tincan--run-hook-script "--check-hook")))
+
 ;; * Footer
 (provide 'tincan)
 ;;; tincan.el ends here

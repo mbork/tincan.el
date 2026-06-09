@@ -185,3 +185,34 @@ one case a `Notification` hook would handle better - it can be added narrowly
 if it proves annoying.
 The literal TUI string ("Cooked for Ns", with a randomized verb) is not stored
 in the transcript and is deliberately not reproduced; only the duration is.
+
+### D20 - Optional Notification hook via a status file (addresses D19's gap)
+The "Claude is waiting for your input" state (tool-permission prompt or idle)
+is the one case the transcript cannot express (D19), so it is covered by an
+*optional* Claude Code `Notification` hook.  The hook is
+`tincan-tail.py --notification-hook`: it reads the event JSON on stdin and
+writes the message to a small per-session file at
+`<config-dir>/tincan/<session-id>.notify`.  A file, deliberately, not
+`emacsclient`, so the producer stays a plain stdin-to-file script with no Emacs
+coupling.
+Installation lives in the Python script too: `--install-hook`,
+`--uninstall-hook`, `--check-hook` (the last exits 0/1), with an optional
+`--settings-file` (default `<config-dir>/settings.json`).  They load the JSON,
+back it up to `.bak`, merge in (or remove) our hook, prune empty containers, and
+write it back with `json.dumps(indent=2)`.  Emacs only provides thin wrappers
+(`tincan-install-hook`, `tincan-uninstall-hook`, `tincan-hook-installed-p`) that
+`call-process` the script and surface its output/exit code.
+Rationale - why Python owns the editing, not Emacs: the hook command string and
+all paths already live in Python, and the script can self-reference its own
+absolute path (`os.path.realpath(__file__)`), so what gets installed provably
+matches what `--check-hook`/`--uninstall-hook` look for - no cross-language
+duplication that could drift.  It also keeps one JSON implementation instead of
+two (the elisp `alist`/vector round-trip is fiddly) and makes the hook
+installable without Emacs.  The only cost is Emacs shelling out and reading an
+exit code, which is trivial.
+Caveats: it does NOT do tool selection - it only signals "Claude wants you",
+which you still handle in the terminal.  The installed command is
+`python3 <script>` (portable, no executable-bit dependency).  After install,
+Claude Code must be restarted or `/hooks` run so it reviews and loads the change
+(its hook-safety mechanism); the round-trip also reformats the settings file,
+hence the backup.
