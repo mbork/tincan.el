@@ -7,3 +7,77 @@ This is a small tool to drive Claude Code from Emacs via tmux.  It consists of a
 3. A slightly more complex Emacs mode to gather the user's responses and send them back to Claude Code.
 4. A set of Claude Code hooks to tell Emacs whether it's working or idle.
 5. An Emacs command orchestrating all previous parts.
+
+So far parts 1 and 2 are implemented; the input mode, the hooks and the
+orchestrating command (parts 3-5) are not written yet.
+
+* Usage
+
+Requirements: Python 3 (standard library only) for the script, and Emacs for
+the viewer.  For the nicest rendering, install [[https://github.com/jrblevin/markdown-mode][markdown-mode]] (optional).
+
+** Selecting a session
+
+=tincan-tail.py= reads Claude Code's own transcript files under
+=~/.claude/projects/=.  Run it from your project directory to list that
+project's sessions, most recent first:
+
+#+begin_src sh
+./tincan-tail.py --show-sessions
+#+end_src
+
+Each line is =SESSION-ID<TAB>TIMESTAMP<TAB>TITLE=.  A session can be named by
+its id, a unique id prefix, or a path to a =.jsonl= transcript.
+
+** Following a transcript with =tail -f=
+
+Print a whole transcript to standard output:
+
+#+begin_src sh
+./tincan-tail.py SESSION
+#+end_src
+
+Or keep watching a live session and append new turns as they arrive, just like
+=tail -f=.  The script only ever appends to stdout and tolerates the partially
+written, invalid JSON of an in-progress turn:
+
+#+begin_src sh
+./tincan-tail.py SESSION --follow
+#+end_src
+
+To watch with =tail -f= itself, stream the transcript into a file and follow
+that file:
+
+#+begin_src sh
+./tincan-tail.py SESSION --follow > transcript.md &
+tail -f transcript.md
+#+end_src
+
+** Viewing in Emacs
+
+Load the mode:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/tincan.el")
+(require 'tincan)
+#+end_src
+
+Stream a session to a file as above, then open that file and turn on the
+viewer together with tail-following:
+
+#+begin_src emacs-lisp
+(progn
+  (find-file "/path/to/transcript.md")
+  (tincan-render-buffer)
+  (auto-revert-tail-mode))
+#+end_src
+
+=tincan-render-buffer= renders the conversation with =markdown-mode= (or
+=gfm-mode=) when available - including native, per-language fontification of
+fenced code blocks - and otherwise falls back to the plain =tincan-view-mode=.
+Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
+=TOOL_USE=, =TOOL_RESULT=) are font-locked and the buffer is read-only.
+
+Relevant options (=M-x customize-group RET tincan RET=):
+- =tincan-markdown-mode= - which Markdown mode to use, or =nil= to disable it.
+- =tincan-fontify-code-blocks-natively= - per-language code-block highlighting.
