@@ -30,6 +30,17 @@
   :group 'tools
   :prefix "tincan-")
 
+;; * The tincan-tail.py script
+(defconst tincan--directory
+  (file-name-directory (or load-file-name buffer-file-name default-directory))
+  "Directory containing tincan.el, used to locate tincan-tail.py.")
+
+(defcustom tincan-script
+  (expand-file-name "tincan-tail.py" tincan--directory)
+  "Path to tincan-tail.py, the helper that prints, follows and manages sessions."
+  :type 'file
+  :group 'tincan)
+
 ;; * Faces
 (defface tincan-user
   '((t :inherit font-lock-keyword-face :weight bold))
@@ -150,16 +161,6 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
 ;; the commands below are thin wrappers around it.  Installing is opt-in and only
 ;; signals "Claude wants you" - it does not handle tool selection.
 
-(defconst tincan--directory
-  (file-name-directory (or load-file-name buffer-file-name default-directory))
-  "Directory containing tincan.el, used to locate tincan-tail.py.")
-
-(defcustom tincan-hook-script
-  (expand-file-name "tincan-tail.py" tincan--directory)
-  "Path to tincan-tail.py, which manages and runs the Notification hook."
-  :type 'file
-  :group 'tincan)
-
 (defcustom tincan-hook-settings-file nil
   "Settings file the Notification hook is installed into.
 When nil, tincan-tail.py uses its own default,
@@ -174,7 +175,7 @@ When nil, tincan-tail.py uses its own default,
                 (list subcommand))))
     (with-temp-buffer
       (let* ((code (apply #'call-process "python3" nil t nil
-                          tincan-hook-script args))
+                          tincan-script args))
              (output (string-trim (buffer-string))))
         (unless (string-empty-p output)
           (message "%s" output))
