@@ -15,8 +15,8 @@ back to Claude Code (part 3) is not written yet.
 
 * Usage
 
-Requirements: Python 3 (standard library only) for the script, and Emacs for
-the viewer.  For the nicest rendering, install [[https://github.com/jrblevin/markdown-mode][markdown-mode]] (optional).
+Requirements: Python 3 (standard library only) for the script, and Emacs 30.1+
+for the viewer.  For the nicest rendering, install [[https://github.com/jrblevin/markdown-mode][markdown-mode]] (optional).
 
 ** Selecting a session
 
@@ -84,6 +84,15 @@ fenced code blocks - and otherwise falls back to the plain =tincan-view-mode=.
 Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
 =TOOL_USE=, =TOOL_RESULT=, and =DONE=) are font-locked and the buffer is
 read-only.
+
+The sections are foldable: =TAB= on a section's =@@@= heading cycles its
+visibility, and =S-TAB= cycles the whole buffer.  Every section except =USER= and
+=ASSISTANT= starts folded - so thinking, tool calls, tool results and =DONE=
+markers stay out of the way until you open them, including as they stream in.
+Customize which roles stay open with =tincan-unfolded-sections=.
+
+Markdown headings inside messages fold too: =TAB= on a Markdown heading
+(e.g. =##=) cycles that heading's subtree, via Markdown's own =markdown-cycle=.
 
 To render a static transcript file instead (for example one you streamed to disk
 with =--follow > file=), open it and call =tincan-render-buffer= yourself,

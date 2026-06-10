@@ -251,3 +251,31 @@ stream (a `@@@ DONE' line means idle), and `needs-input' is driven by a
 we watch the directory and match the basename), cleared back to `working'/`idle'
 when transcript activity resumes.  The watch is best-effort: if the optional hook
 (D20) is not installed or watching is unsupported, only working/idle show.
+
+### D22 - Foldable `@@@` sections, folded by default except USER/ASSISTANT
+The viewer folds `@@@` sections with `outline-minor-mode' (`outline-regexp' set
+to `@@@ ', all headings level 1).  `outline-minor-mode-cycle' (Emacs 28.1+)
+binds TAB on a section's heading to `outline-cycle' and S-TAB to
+`outline-cycle-buffer'.  This wins over the major mode's TAB on headings because
+outline installs the binding on the heading via an overlay keymap (higher
+precedence than the major-mode map); off a heading TAB falls through to the
+mode (e.g. `markdown-cycle').  It works in GUI too: `markdown-mode' binds TAB as
+`[9]' (not `<tab>'), so a GUI `<tab>' with no binding is translated to `[9]'
+and lands on `outline-cycle' on a heading.  Every section whose role is not in
+`tincan-unfolded-sections' (default `("USER" "ASSISTANT")') starts folded,
+keeping thinking/tool calls/tool results/DONE out of the way.
+Folding is overlay-based, so it works in the read-only buffer with no
+`inhibit-read-only'.  `tincan--autofold' only folds sections it has not passed
+(tracked by `tincan--fold-marker', the same idiom as the scan marker) and never
+folds the still-arriving last section, so streaming folds new sections exactly
+once and never re-folds one the user manually opened.
+TAB cycles only on the section's heading line, not anywhere within the section -
+that is `outline-minor-mode-cycle''s behavior (see D23 for the Emacs floor it
+relies on).
+
+### D23 - Emacs 30.1 floor
+`Package-Requires' is `((emacs "30.1"))'.  The folding (D22) relies on
+`outline-minor-mode-cycle' (Emacs 28.1+); nothing else in the file needs to run
+on older Emacs.
+Rationale: a personal tool run on current Emacs - no reason to carry a lower
+floor, and the folding is simpler for leaning on the built-in cycle keys.

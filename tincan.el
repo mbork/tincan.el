@@ -98,6 +98,58 @@ Section markers of the form \"@@@ ROLE\" are font-locked according to the
 `tincan-tool-result' and `tincan-done' faces."
   (setq-local font-lock-defaults '(tincan-font-lock-keywords t)))
 
+;; * Folding
+;; The @@@ sections are foldable with `outline-minor-mode'.  With
+;; `outline-minor-mode-cycle', TAB on a section's @@@ heading cycles its
+;; visibility and S-TAB cycles the whole buffer.  Every section except those in
+;; `tincan-unfolded-sections' starts folded, so thinking, tool calls/results and
+;; DONE markers stay out of the way until opened.  Folding uses overlays, so it
+;; works in the read-only buffer; auto-folding is marker-driven so manual
+;; unfolds are preserved.
+(require 'outline)
+
+(defcustom tincan-unfolded-sections '("USER" "ASSISTANT")
+  "Roles of \"@@@ ROLE\" sections shown expanded by default.
+Every other section (THINKING, TOOL_USE, TOOL_RESULT, DONE, ...) starts folded."
+  :type '(repeat string)
+  :group 'tincan)
+
+(defvar-local tincan--fold-marker nil
+  "Marker up to which streamed @@@ sections have been auto-folded.")
+
+(defun tincan--default-folded-p (role)
+  "Non-nil if a section with ROLE should start folded."
+  (not (member role tincan-unfolded-sections)))
+
+(defun tincan--autofold ()
+  "Fold complete, default-folded @@@ sections from `tincan--fold-marker'.
+A section is complete once another @@@ heading follows it; the last (still
+arriving) section is left open until its successor shows up.  Sections already
+passed are not revisited, so manual unfolding is preserved."
+  (when tincan--fold-marker
+    (save-excursion
+      (goto-char tincan--fold-marker)
+      (catch 'incomplete
+        (while (re-search-forward "^@@@ \\([A-Z_]+\\)" nil t)
+          (let ((role (match-string 1))
+                (heading (match-beginning 0)))
+            (unless (save-excursion (re-search-forward "^@@@ " nil t))
+              (set-marker tincan--fold-marker heading)
+              (throw 'incomplete nil))
+            (when (tincan--default-folded-p role)
+              (save-excursion (goto-char heading) (outline-hide-subtree)))
+            (set-marker tincan--fold-marker (line-end-position))))))))
+
+(defun tincan--setup-folding ()
+  "Enable @@@-section folding in the current buffer and apply the default fold."
+  (setq-local outline-regexp "@@@ ")
+  (setq-local outline-level (lambda () 1))
+  (setq-local outline-minor-mode-highlight nil)
+  (setq-local outline-minor-mode-cycle t)
+  (outline-minor-mode 1)
+  (setq-local tincan--fold-marker (copy-marker (point-min)))
+  (tincan--autofold))
+
 ;; * Rendering
 (defcustom tincan-markdown-mode t
   "How to render a tincan transcript with Markdown.
@@ -153,7 +205,8 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
           (font-lock-flush))
       (tincan-view-mode)))
   ;; Soft-wrap long prose and tool output at word boundaries.
-  (visual-line-mode 1))
+  (visual-line-mode 1)
+  (tincan--setup-folding))
 
 ;; * Notification hook
 ;; Optional integration: a Claude Code "Notification" hook runs tincan.py,
@@ -364,6 +417,7 @@ just will not appear if the optional hook is absent or watching is unsupported."
             (insert chunk)
             (set-marker mark (point)))
           (tincan--scan-for-state mark)
+          (tincan--autofold)
           ;; Follow the tail in any window that was already at the end.
           (dolist (window (get-buffer-window-list buffer nil t))
             (when (>= (window-point window) old)
