@@ -203,6 +203,117 @@ Interactively, report the result in the echo area."
   (interactive)
   (= 0 (tincan--run-hook-script "--check-hook")))
 
+;; * Session orchestration
+;; `tincan' picks one of this project's sessions and watches it live: it runs
+;; tincan-tail.py --follow as an async process and feeds the output into a
+;; rendered, read-only buffer through a process filter.  Output may arrive in
+;; arbitrary chunks (even mid-line), so the filter follows the marker idiom -
+;; insert at the process mark, and process only newline-terminated lines.
+(defvar-local tincan--process nil
+  "The tincan-tail.py --follow process feeding the current buffer.")
+
+(defvar-local tincan--session-id nil
+  "The Claude Code session id shown in the current buffer.")
+
+(defun tincan--short-id (session-id)
+  "Return a short, buffer-name-friendly form of SESSION-ID."
+  (substring session-id 0 (min 8 (length session-id))))
+
+;; ** Session selection
+(defun tincan--list-sessions ()
+  "Return an alist of (DISPLAY . ID) for this project's sessions.
+DISPLAY is \"TIMESTAMP  TITLE\".  Runs tincan-tail.py in `default-directory',
+whose sessions are the ones it lists."
+  (with-temp-buffer
+    (let ((code (call-process "python3" nil t nil tincan-script "--show-sessions")))
+      (unless (= code 0)
+        (error "tincan: --show-sessions failed: %s" (string-trim (buffer-string))))
+      (let ((sessions '()))
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let* ((line (buffer-substring-no-properties
+                        (line-beginning-position) (line-end-position)))
+                 (fields (split-string line "\t")))
+            (when (>= (length fields) 3)
+              (push (cons (format "%s  %s" (nth 1 fields) (nth 2 fields))
+                          (nth 0 fields))
+                    sessions)))
+          (forward-line 1))
+        (nreverse sessions)))))
+
+(defun tincan--read-session ()
+  "Prompt for one of this project's sessions and return its id."
+  (let ((sessions (tincan--list-sessions)))
+    (unless sessions
+      (user-error "tincan: no sessions for %s" default-directory))
+    (cdr (assoc (completing-read "tincan session: " sessions nil t) sessions))))
+
+;; ** Watching a session
+(defun tincan--filter (proc chunk)
+  "Insert CHUNK from PROC at its process mark, following the tail."
+  (let ((buffer (process-buffer proc)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (let* ((mark (process-mark proc))
+               (old (marker-position mark))
+               (inhibit-read-only t))
+          (save-excursion
+            (goto-char mark)
+            (insert chunk)
+            (set-marker mark (point)))
+          ;; Follow the tail in any window that was already at the end.
+          (dolist (window (get-buffer-window-list buffer nil t))
+            (when (>= (window-point window) old)
+              (set-window-point window (point-max)))))))))
+
+(defun tincan--sentinel (proc event)
+  "Report when the tincan follower PROC ends (EVENT)."
+  (let ((buffer (process-buffer proc)))
+    (when (and (buffer-live-p buffer) (not (process-live-p proc)))
+      (with-current-buffer buffer
+        (message "tincan: follower for %s exited (%s)"
+                 tincan--session-id (string-trim event))))))
+
+(defun tincan--kill-process ()
+  "Kill this buffer's follower process; for `kill-buffer-hook'."
+  (when (process-live-p tincan--process)
+    (delete-process tincan--process)))
+
+(defun tincan--watch (session buffer-name)
+  "Set up BUFFER-NAME to watch SESSION (an id or transcript path); return it.
+Reuse the buffer if it is already watching with a live process."
+  (let ((existing (get-buffer buffer-name)))
+    (if (and existing
+             (process-live-p (buffer-local-value 'tincan--process existing)))
+        existing
+      (let ((buffer (get-buffer-create buffer-name)))
+        (with-current-buffer buffer
+          (let ((inhibit-read-only t))
+            (erase-buffer))
+          (tincan-render-buffer)
+          (setq-local tincan--session-id session)
+          (add-hook 'kill-buffer-hook #'tincan--kill-process nil t)
+          (let ((proc (make-process
+                       :name (format "tincan-%s" session)
+                       :buffer buffer
+                       :command (list "python3" tincan-script session "--follow")
+                       :connection-type 'pipe
+                       :filter #'tincan--filter
+                       :sentinel #'tincan--sentinel
+                       :noquery t)))
+            (setq-local tincan--process proc)
+            (set-marker (process-mark proc) (point-max))))
+        buffer))))
+
+;;;###autoload
+(defun tincan (session-id)
+  "Watch a Claude Code SESSION-ID live in a read-only buffer.
+Interactively, choose among this project's sessions."
+  (interactive (list (tincan--read-session)))
+  (pop-to-buffer
+   (tincan--watch session-id
+                  (format "*tincan: %s*" (tincan--short-id session-id)))))
+
 ;; * Footer
 (provide 'tincan)
 ;;; tincan.el ends here

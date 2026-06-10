@@ -220,3 +220,24 @@ which you still handle in the terminal.  The installed command is
 Claude Code must be restarted or `/hooks` run so it reviews and loads the change
 (its hook-safety mechanism); the round-trip also reformats the settings file,
 hence the backup.
+
+### D21 - Read-only orchestration via a process filter
+`M-x tincan' picks a session (from `tincan-tail.py --show-sessions', parsed from
+its tab-separated output via `completing-read') and watches it live: it runs
+`tincan-tail.py <id> --follow' as an async `make-process' whose filter feeds the
+output into a rendered, read-only buffer.
+Chosen over streaming to a temp file + `auto-revert-tail-mode' because the
+filter is event-driven (no temp file, no second polling layer on top of the
+follower's own poll) and the same function that inserts text is the natural
+place to react to in-stream markers like `@@@ DONE'.  The cost is handling
+chunked output ourselves: process output arrives in arbitrary chunks, and a line
+(or even a searched string) can be split across calls.  The filter therefore
+uses the marker idiom (see [[process-filter-idiom]]): insert each chunk at the
+`process-mark', and act only on newline-terminated lines - the same discipline
+tincan-tail.py uses on the file side, mirrored with a marker instead of a byte
+offset.
+Session selection runs in `default-directory' (that is the cwd
+`--show-sessions' filters by), so invoke `tincan' from the project root; the
+follower itself resolves the session by id regardless of cwd.  The buffer reuses
+a live watcher, follows the tail only in windows already at the end, and kills
+the follower from `kill-buffer-hook'.
