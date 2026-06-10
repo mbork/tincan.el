@@ -151,7 +151,9 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
           (font-lock-add-keywords nil tincan-font-lock-keywords 'append)
           (setq buffer-read-only t)
           (font-lock-flush))
-      (tincan-view-mode))))
+      (tincan-view-mode)))
+  ;; Soft-wrap long prose and tool output at word boundaries.
+  (visual-line-mode 1))
 
 ;; * Notification hook
 ;; Optional integration: a Claude Code "Notification" hook runs tincan-tail.py,
