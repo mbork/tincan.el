@@ -11,7 +11,7 @@
 
 ;; tincan is a hackish take on agentic coding in Emacs: it drives Claude Code
 ;; via tmux.  This file handles the display side of a Claude Code transcript
-;; produced by tincan-tail.py.
+;; produced by tincan.py.
 ;;
 ;; Call `tincan-render-buffer' to set up the current buffer for viewing: it
 ;; renders the conversation with a Markdown mode when one is available (see
@@ -30,14 +30,14 @@
   :group 'tools
   :prefix "tincan-")
 
-;; * The tincan-tail.py script
+;; * The tincan.py script
 (defconst tincan--directory
   (file-name-directory (or load-file-name buffer-file-name default-directory))
-  "Directory containing tincan.el, used to locate tincan-tail.py.")
+  "Directory containing tincan.el, used to locate tincan.py.")
 
 (defcustom tincan-script
-  (expand-file-name "tincan-tail.py" tincan--directory)
-  "Path to tincan-tail.py, the helper that prints, follows and manages sessions."
+  (expand-file-name "tincan.py" tincan--directory)
+  "Path to tincan.py, the helper that prints, follows and manages sessions."
   :type 'file
   :group 'tincan)
 
@@ -73,7 +73,7 @@
   :group 'tincan)
 
 ;; * Font lock
-;; The markers below must stay in sync with tincan-tail.py's ROLE_* constants.
+;; The markers below must stay in sync with tincan.py's ROLE_* constants.
 (defvar tincan-font-lock-keywords
   '(("^@@@ USER.*$" 0 'tincan-user t)
     ("^@@@ ASSISTANT.*$" 0 'tincan-assistant t)
@@ -156,7 +156,7 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
   (visual-line-mode 1))
 
 ;; * Notification hook
-;; Optional integration: a Claude Code "Notification" hook runs tincan-tail.py,
+;; Optional integration: a Claude Code "Notification" hook runs tincan.py,
 ;; which writes a small per-session file when Claude is waiting for input (e.g.
 ;; a tool-permission prompt).  All settings.json editing is done by the Python
 ;; script, so the installed command and its paths have a single source of truth;
@@ -165,13 +165,13 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
 
 (defcustom tincan-hook-settings-file nil
   "Settings file the Notification hook is installed into.
-When nil, tincan-tail.py uses its own default,
+When nil, tincan.py uses its own default,
 \".claude/settings.local.json\" relative to the working directory."
   :type '(choice (const :tag "Script default" nil) file)
   :group 'tincan)
 
 (defun tincan--run-hook-script (subcommand)
-  "Run tincan-tail.py with SUBCOMMAND, echo its output, return its exit code."
+  "Run tincan.py with SUBCOMMAND, echo its output, return its exit code."
   (let ((args (if tincan-hook-settings-file
                   (list subcommand "--settings-file" tincan-hook-settings-file)
                 (list subcommand))))
@@ -185,7 +185,7 @@ When nil, tincan-tail.py uses its own default,
 
 ;;;###autoload
 (defun tincan-install-hook ()
-  "Install tincan's Notification hook (via tincan-tail.py).
+  "Install tincan's Notification hook (via tincan.py).
 Installing is optional; tincan works without it.  The script backs up the
 settings file first.  Afterwards, restart Claude Code or run /hooks so the
 change is reviewed and loaded."
@@ -194,7 +194,7 @@ change is reviewed and loaded."
 
 ;;;###autoload
 (defun tincan-uninstall-hook ()
-  "Remove tincan's Notification hook (via tincan-tail.py)."
+  "Remove tincan's Notification hook (via tincan.py)."
   (interactive)
   (tincan--run-hook-script "--uninstall-hook"))
 
@@ -207,14 +207,14 @@ Interactively, report the result in the echo area."
 
 ;; * Session orchestration
 ;; `tincan' picks one of this project's sessions and watches it live: it runs
-;; tincan-tail.py --follow as an async process and feeds the output into a
+;; tincan.py --follow as an async process and feeds the output into a
 ;; rendered, read-only buffer through a process filter.  Output may arrive in
 ;; arbitrary chunks (even mid-line), so the filter follows the marker idiom -
 ;; insert at the process mark, and process only newline-terminated lines.
 (require 'filenotify)
 
 (defvar-local tincan--process nil
-  "The tincan-tail.py --follow process feeding the current buffer.")
+  "The tincan.py --follow process feeding the current buffer.")
 
 (defvar-local tincan--session-id nil
   "The Claude Code session id shown in the current buffer.")
@@ -226,7 +226,7 @@ Interactively, report the result in the echo area."
 ;; ** Session selection
 (defun tincan--list-sessions ()
   "Return an alist of (DISPLAY . ID) for this project's sessions.
-DISPLAY is \"TIMESTAMP  TITLE\".  Runs tincan-tail.py in `default-directory',
+DISPLAY is \"TIMESTAMP  TITLE\".  Runs tincan.py in `default-directory',
 whose sessions are the ones it lists."
   (with-temp-buffer
     (let ((code (call-process "python3" nil t nil tincan-script "--show-sessions")))
@@ -324,7 +324,7 @@ any incomplete trailing line so a later chunk completes it."
 
 (defun tincan--notify-file (session-id)
   "Return the notify status file the hook writes for SESSION-ID.
-Mirrors tincan-tail.py's notify_status_path."
+Mirrors tincan.py's notify_status_path."
   (expand-file-name (concat session-id ".notify")
                     (expand-file-name "tincan" (tincan--config-dir))))
 

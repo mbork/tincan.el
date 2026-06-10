@@ -10,9 +10,13 @@ or reverted in isolation.  Each entry notes the commit theme it belongs to.
 Python 3, standard library only, no third-party dependencies.
 Rationale: KISS MVP; the script only reads JSONL files and writes text.
 
-### D2 - Script filename: `tincan-tail.py`
-Rationale: its job is to print/tail a session transcript; the name follows the
-project's lowercase-with-dashes file-naming convention.
+### D2 - Script filename: `tincan.py`
+Originally `tincan-tail.py`, renamed to `tincan.py` once it outgrew tailing:
+it now also lists sessions, runs the Notification hook, and installs/removes/
+checks it.  `tincan.py` is the single Python entry point, sitting alongside
+`tincan.el`.  Note the installed hook command embeds this file's absolute path
+(from `realpath(__file__)`), so a rename requires re-pointing any installed
+hook (re-run `--install-hook`, or edit the settings file).
 
 ### D3 - Session resolution
 The positional argument may be: a path to a `.jsonl` file, a full session id,
@@ -102,7 +106,7 @@ Five customizable faces (`tincan-user`, `tincan-assistant`, `tincan-thinking`,
 are applied to the whole marker line; `font-lock-defaults` is keywords-only (no
 syntactic fontification).  Block bodies are not fontified in the MVP.
 Rationale: matches the "very simple" brief, looks reasonable in any theme, and
-keeps the marker contract with tincan-tail.py explicit in one `defvar`.
+keeps the marker contract with tincan.py explicit in one `defvar`.
 
 ### D16 - Markdown rendering via a runtime dispatcher
 Transcript bodies are Markdown (Claude's output), so `tincan-render-buffer`
@@ -190,7 +194,7 @@ in the transcript and is deliberately not reproduced; only the duration is.
 The "Claude is waiting for your input" state (tool-permission prompt or idle)
 is the one case the transcript cannot express (D19), so it is covered by an
 *optional* Claude Code `Notification` hook.  The hook is
-`tincan-tail.py --notification-hook`: it reads the event JSON on stdin and
+`tincan.py --notification-hook`: it reads the event JSON on stdin and
 writes the message to a small per-session file at
 `<config-dir>/tincan/<session-id>.notify`.  A file, deliberately, not
 `emacsclient`, so the producer stays a plain stdin-to-file script with no Emacs
@@ -222,9 +226,9 @@ Claude Code must be restarted or `/hooks` run so it reviews and loads the change
 hence the backup.
 
 ### D21 - Read-only orchestration via a process filter
-`M-x tincan' picks a session (from `tincan-tail.py --show-sessions', parsed from
+`M-x tincan' picks a session (from `tincan.py --show-sessions', parsed from
 its tab-separated output via `completing-read') and watches it live: it runs
-`tincan-tail.py <id> --follow' as an async `make-process' whose filter feeds the
+`tincan.py <id> --follow' as an async `make-process' whose filter feeds the
 output into a rendered, read-only buffer.
 Chosen over streaming to a temp file + `auto-revert-tail-mode' because the
 filter is event-driven (no temp file, no second polling layer on top of the
@@ -234,7 +238,7 @@ chunked output ourselves: process output arrives in arbitrary chunks, and a line
 (or even a searched string) can be split across calls.  The filter therefore
 uses the marker idiom (see [[process-filter-idiom]]): insert each chunk at the
 `process-mark', and act only on newline-terminated lines - the same discipline
-tincan-tail.py uses on the file side, mirrored with a marker instead of a byte
+tincan.py uses on the file side, mirrored with a marker instead of a byte
 offset.
 Session selection runs in `default-directory' (that is the cwd
 `--show-sessions' filters by), so invoke `tincan' from the project root; the

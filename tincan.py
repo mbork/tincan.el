@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# * tincan-tail
+# * tincan
 # Print (and, with --follow, keep watching) a Claude Code session transcript as
 # plain, font-lockable text on stdout.  See DECISIONS.md for design notes.
 

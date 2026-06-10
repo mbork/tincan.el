@@ -20,12 +20,12 @@ the viewer.  For the nicest rendering, install [[https://github.com/jrblevin/mar
 
 ** Selecting a session
 
-=tincan-tail.py= reads Claude Code's own transcript files under
+=tincan.py= reads Claude Code's own transcript files under
 =~/.claude/projects/=.  Run it from your project directory to list that
 project's sessions, most recent first:
 
 #+begin_src sh
-./tincan-tail.py --show-sessions
+./tincan.py --show-sessions
 #+end_src
 
 Each line is =SESSION-ID<TAB>TIMESTAMP<TAB>TITLE=.  A session can be named by
@@ -36,7 +36,7 @@ its id, a unique id prefix, or a path to a =.jsonl= transcript.
 Print a whole transcript to standard output:
 
 #+begin_src sh
-./tincan-tail.py SESSION
+./tincan.py SESSION
 #+end_src
 
 Or keep watching a live session and append new turns as they arrive, just like
@@ -44,14 +44,14 @@ Or keep watching a live session and append new turns as they arrive, just like
 written, invalid JSON of an in-progress turn:
 
 #+begin_src sh
-./tincan-tail.py SESSION --follow
+./tincan.py SESSION --follow
 #+end_src
 
 To watch with =tail -f= itself, stream the transcript into a file and follow
 that file:
 
 #+begin_src sh
-./tincan-tail.py SESSION --follow > transcript.md &
+./tincan.py SESSION --follow > transcript.md &
 tail -f transcript.md
 #+end_src
 
@@ -71,7 +71,7 @@ M-x tincan
 #+end_src
 
 Run it from the project root (where you start Claude Code).  It lists that
-project's sessions, lets you pick one, launches =tincan-tail.py --follow=, and
+project's sessions, lets you pick one, launches =tincan.py --follow=, and
 shows the rendered transcript in a read-only buffer that updates as Claude works.
 The mode line shows the agent's state: =[working]=, =[idle]= (after a =@@@ DONE=
 turn-end marker, derived from Claude Code's =turn_duration= record), and - if the
@@ -122,7 +122,7 @@ These are thin wrappers around the script, which does the actual work and can
 also be driven directly:
 
 #+begin_src sh
-./tincan-tail.py --install-hook      # also --uninstall-hook, --check-hook
+./tincan.py --install-hook      # also --uninstall-hook, --check-hook
 #+end_src
 
 By default the script edits =.claude/settings.local.json= in the current
