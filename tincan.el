@@ -209,6 +209,8 @@ Interactively, report the result in the echo area."
 ;; rendered, read-only buffer through a process filter.  Output may arrive in
 ;; arbitrary chunks (even mid-line), so the filter follows the marker idiom -
 ;; insert at the process mark, and process only newline-terminated lines.
+(require 'filenotify)
+
 (defvar-local tincan--process nil
   "The tincan-tail.py --follow process feeding the current buffer.")
 
@@ -267,11 +269,16 @@ whose sessions are the ones it lists."
   "Mode-line face shown when the agent is idle (the turn finished)."
   :group 'tincan)
 
+(defface tincan-state-needs-input '((t :inherit error :weight bold))
+  "Mode-line face shown when Claude is waiting for your input."
+  :group 'tincan)
+
 (defun tincan--mode-line-string (state)
   "Return the mode-line indicator string for STATE."
   (pcase state
     ('working (propertize " [working]" 'face 'tincan-state-working))
     ('idle (propertize " [idle]" 'face 'tincan-state-idle))
+    ('needs-input (propertize " [needs input]" 'face 'tincan-state-needs-input))
     (_ "")))
 
 (defun tincan--set-state (state)
@@ -301,6 +308,46 @@ any incomplete trailing line so a later chunk completes it."
       (forward-line 1))
     (set-marker tincan--scan-marker (point))))
 
+;; ** Notification watch
+;; The hook writes <config-dir>/tincan/<session-id>.notify when Claude wants
+;; input (D20).  We watch the directory (the file may not exist yet) and flag
+;; `needs-input' on a write; resumed transcript activity clears it back to
+;; `working' or `idle'.
+(defvar-local tincan--notify-watch nil
+  "File-notify descriptor for this buffer's .notify status file, or nil.")
+
+(defun tincan--config-dir ()
+  "Return Claude Code's config directory (honoring CLAUDE_CONFIG_DIR)."
+  (expand-file-name (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude")))
+
+(defun tincan--notify-file (session-id)
+  "Return the notify status file the hook writes for SESSION-ID.
+Mirrors tincan-tail.py's notify_status_path."
+  (expand-file-name (concat session-id ".notify")
+                    (expand-file-name "tincan" (tincan--config-dir))))
+
+(defun tincan--setup-notify-watch (session-id)
+  "Watch SESSION-ID's notify file and flag `needs-input' on change.
+Return the watch descriptor, or nil.  Failures are non-fatal: the indicator
+just will not appear if the optional hook is absent or watching is unsupported."
+  (let* ((file (tincan--notify-file session-id))
+         (directory (file-name-directory file))
+         (basename (file-name-nondirectory file))
+         (buffer (current-buffer)))
+    (condition-case nil
+        (progn
+          (unless (file-directory-p directory)
+            (make-directory directory t))
+          (file-notify-add-watch
+           directory '(change)
+           (lambda (event)
+             (when (and (memq (nth 1 event) '(created changed renamed))
+                        (equal (file-name-nondirectory (nth 2 event)) basename)
+                        (buffer-live-p buffer))
+               (with-current-buffer buffer
+                 (tincan--set-state 'needs-input))))))
+      (error nil))))
+
 ;; ** Watching a session
 (defun tincan--filter (proc chunk)
   "Insert CHUNK from PROC at its process mark; follow the tail and track state."
@@ -328,10 +375,14 @@ any incomplete trailing line so a later chunk completes it."
         (message "tincan: follower for %s exited (%s)"
                  tincan--session-id (string-trim event))))))
 
-(defun tincan--kill-process ()
-  "Kill this buffer's follower process; for `kill-buffer-hook'."
+(defun tincan--cleanup ()
+  "Tear down this buffer's follower process and notify watch.
+For `kill-buffer-hook'."
   (when (process-live-p tincan--process)
-    (delete-process tincan--process)))
+    (delete-process tincan--process))
+  (when tincan--notify-watch
+    (file-notify-rm-watch tincan--notify-watch)
+    (setq tincan--notify-watch nil)))
 
 (defun tincan--watch (session buffer-name)
   "Set up BUFFER-NAME to watch SESSION (an id or transcript path); return it.
@@ -348,7 +399,7 @@ Reuse the buffer if it is already watching with a live process."
           (setq-local tincan--session-id session)
           (setq-local tincan--scan-marker (copy-marker (point-min)))
           (tincan--set-state 'working)
-          (add-hook 'kill-buffer-hook #'tincan--kill-process nil t)
+          (add-hook 'kill-buffer-hook #'tincan--cleanup nil t)
           (let ((proc (make-process
                        :name (format "tincan-%s" session)
                        :buffer buffer
@@ -358,7 +409,8 @@ Reuse the buffer if it is already watching with a live process."
                        :sentinel #'tincan--sentinel
                        :noquery t)))
             (setq-local tincan--process proc)
-            (set-marker (process-mark proc) (point-max))))
+            (set-marker (process-mark proc) (point-max)))
+          (setq-local tincan--notify-watch (tincan--setup-notify-watch session)))
         buffer))))
 
 ;;;###autoload

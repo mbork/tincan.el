@@ -241,3 +241,9 @@ Session selection runs in `default-directory' (that is the cwd
 follower itself resolves the session by id regardless of cwd.  The buffer reuses
 a live watcher, follows the tail only in windows already at the end, and kills
 the follower from `kill-buffer-hook'.
+The agent state is shown in the mode line: `working'/`idle' is derived from the
+stream (a `@@@ DONE' line means idle), and `needs-input' is driven by a
+`file-notify' watch on the `.notify' *directory* (the file may not exist yet, so
+we watch the directory and match the basename), cleared back to `working'/`idle'
+when transcript activity resumes.  The watch is best-effort: if the optional hook
+(D20) is not installed or watching is unsupported, only working/idle show.
