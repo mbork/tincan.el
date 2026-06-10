@@ -248,9 +248,62 @@ whose sessions are the ones it lists."
       (user-error "tincan: no sessions for %s" default-directory))
     (cdr (assoc (completing-read "tincan session: " sessions nil t) sessions))))
 
+;; ** State and mode line
+;; The agent's state is derived from the transcript stream: a `@@@ DONE' line
+;; means the turn finished (idle); any other content means it is working.
+;; `tincan--scan-marker' tracks how far we have scanned, so chunked/partial
+;; lines are handled the same way the follower handles partial writes.
+(defvar-local tincan--state nil
+  "Current agent state for the buffer: nil, `working', `idle' or `needs-input'.")
+
+(defvar-local tincan--scan-marker nil
+  "Marker up to which output has been scanned for state markers.")
+
+(defface tincan-state-working '((t :inherit warning))
+  "Mode-line face shown while the agent is working."
+  :group 'tincan)
+
+(defface tincan-state-idle '((t :inherit success))
+  "Mode-line face shown when the agent is idle (the turn finished)."
+  :group 'tincan)
+
+(defun tincan--mode-line-string (state)
+  "Return the mode-line indicator string for STATE."
+  (pcase state
+    ('working (propertize " [working]" 'face 'tincan-state-working))
+    ('idle (propertize " [idle]" 'face 'tincan-state-idle))
+    (_ "")))
+
+(defun tincan--set-state (state)
+  "Set the buffer's tincan STATE and reflect it in the mode line."
+  (unless (eq tincan--state state)
+    (setq tincan--state state)
+    (setq-local mode-line-process (tincan--mode-line-string state))
+    (force-mode-line-update)))
+
+(defun tincan--update-state-from-line (line)
+  "Update the agent state from a completed transcript LINE."
+  (cond ((string-prefix-p "@@@ DONE" line)
+         (tincan--set-state 'idle))
+        ((not (string-empty-p line))
+         (tincan--set-state 'working))))
+
+(defun tincan--scan-for-state (limit)
+  "Scan complete lines from `tincan--scan-marker' up to LIMIT, updating state.
+Only newline-terminated lines are scanned; the marker is left at the start of
+any incomplete trailing line so a later chunk completes it."
+  (save-excursion
+    (goto-char tincan--scan-marker)
+    (while (and (< (point) limit)
+                (save-excursion (search-forward "\n" limit t)))
+      (tincan--update-state-from-line
+       (buffer-substring-no-properties (point) (line-end-position)))
+      (forward-line 1))
+    (set-marker tincan--scan-marker (point))))
+
 ;; ** Watching a session
 (defun tincan--filter (proc chunk)
-  "Insert CHUNK from PROC at its process mark, following the tail."
+  "Insert CHUNK from PROC at its process mark; follow the tail and track state."
   (let ((buffer (process-buffer proc)))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
@@ -261,6 +314,7 @@ whose sessions are the ones it lists."
             (goto-char mark)
             (insert chunk)
             (set-marker mark (point)))
+          (tincan--scan-for-state mark)
           ;; Follow the tail in any window that was already at the end.
           (dolist (window (get-buffer-window-list buffer nil t))
             (when (>= (window-point window) old)
@@ -292,6 +346,8 @@ Reuse the buffer if it is already watching with a live process."
             (erase-buffer))
           (tincan-render-buffer)
           (setq-local tincan--session-id session)
+          (setq-local tincan--scan-marker (copy-marker (point-min)))
+          (tincan--set-state 'working)
           (add-hook 'kill-buffer-hook #'tincan--kill-process nil t)
           (let ((proc (make-process
                        :name (format "tincan-%s" session)
