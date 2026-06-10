@@ -8,8 +8,10 @@ This is a small tool to drive Claude Code from Emacs via tmux.  It consists of a
 4. A set of Claude Code hooks to tell Emacs whether it's working or idle.
 5. An Emacs command orchestrating all previous parts.
 
-So far parts 1 and 2 are implemented; the input mode, the hooks and the
-orchestrating command (parts 3-5) are not written yet.
+So far everything except the input mode (part 3) is implemented: the transcript
+script, the font-locked viewer, the working/idle and needs-input signals, and
+the read-only =M-x tincan= command that ties them together.  Sending replies
+back to Claude Code (part 3) is not written yet.
 
 * Usage
 
@@ -62,8 +64,30 @@ Load the mode:
 (require 'tincan)
 #+end_src
 
-Stream a session to a file as above, then open that file and turn on the
-viewer together with tail-following:
+Then watch a session live with one command:
+
+#+begin_src
+M-x tincan
+#+end_src
+
+Run it from the project root (where you start Claude Code).  It lists that
+project's sessions, lets you pick one, launches =tincan-tail.py --follow=, and
+shows the rendered transcript in a read-only buffer that updates as Claude works.
+The mode line shows the agent's state: =[working]=, =[idle]= (after a =@@@ DONE=
+turn-end marker, derived from Claude Code's =turn_duration= record), and - if the
+optional hook below is installed - =[needs input]= when Claude is waiting for you
+in the terminal.
+
+=M-x tincan= renders through =tincan-render-buffer=, which uses =markdown-mode=
+(or =gfm-mode=) when available - including native, per-language fontification of
+fenced code blocks - and otherwise falls back to the plain =tincan-view-mode=.
+Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
+=TOOL_USE=, =TOOL_RESULT=, and =DONE=) are font-locked and the buffer is
+read-only.
+
+To render a static transcript file instead (for example one you streamed to disk
+with =--follow > file=), open it and call =tincan-render-buffer= yourself,
+optionally with =auto-revert-tail-mode= for tail-following:
 
 #+begin_src emacs-lisp
 (progn
@@ -71,15 +95,6 @@ viewer together with tail-following:
   (tincan-render-buffer)
   (auto-revert-tail-mode))
 #+end_src
-
-=tincan-render-buffer= renders the conversation with =markdown-mode= (or
-=gfm-mode=) when available - including native, per-language fontification of
-fenced code blocks - and otherwise falls back to the plain =tincan-view-mode=.
-Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
-=TOOL_USE=, =TOOL_RESULT=, and =DONE=) are font-locked and the buffer is
-read-only.  A =@@@ DONE (32s)= line marks the end of a turn (derived from
-Claude Code's =turn_duration= record); a later part will use it to tell when
-the agent has finished.
 
 Relevant options (=M-x customize-group RET tincan RET=):
 - =tincan-markdown-mode= - which Markdown mode to use, or =nil= to disable it.
@@ -91,9 +106,9 @@ When Claude pauses for a tool-permission prompt (or sits idle waiting for a
 prompt), nothing is written to the transcript - that prompt is terminal-only
 UI - so the viewer cannot show it on its own.  To surface it, tincan can install
 an optional Claude Code =Notification= hook that writes a small per-session file
-at =<config-dir>/tincan/<session-id>.notify=; a later part of tincan will watch
-that file and show the state.  The hook only signals that Claude wants you - you
-still answer the prompt in the terminal.
+at =<config-dir>/tincan/<session-id>.notify=; =M-x tincan= watches that file and
+shows =[needs input]= in the mode line.  The hook only signals that Claude wants
+you - you still answer the prompt in the terminal.
 
 Install (and uninstall) it from Emacs:
 
