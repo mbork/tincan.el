@@ -279,3 +279,32 @@ relies on).
 on older Emacs.
 Rationale: a personal tool run on current Emacs - no reason to carry a lower
 floor, and the folding is simpler for leaning on the built-in cycle keys.
+
+## Input mode (user -> Claude)
+
+These decisions are agreed but not yet implemented; they record the chosen shape
+of sending textual replies back to Claude Code.
+
+### D24 - No tmux: run Claude in an Emacs terminal buffer
+Claude is launched directly in an Emacs terminal-emulator buffer (see D26), not
+inside tmux.  Replies are sent to that buffer's process, which is the send
+target, so there is no session naming or pane discovery.
+Rationale: simplicity over persistence, per the project's guiding principle.
+The cost, accepted deliberately: no persistence/detach (killing the buffer or
+Emacs ends the Claude session and loses an in-flight run) and no external-
+terminal escape hatch for the TUI.  A kill confirmation is the only safeguard.
+
+### D25 - Split "start Claude" from "attach a view"
+Starting Claude and attaching a tincan view buffer are separate commands.
+Rationale: a freshly started Claude session's transcript id is not known until
+Claude writes the file, so auto-attaching at start is racy.  Making attach a
+manual pick (from `tincan.py --show-sessions', newest first) sidesteps the race
+entirely and doubles as the escape hatch.
+
+### D26 - vterm when available, term as fallback
+The terminal buffer uses `vterm' if it is available, else the built-in `term'.
+Rationale: vterm renders Claude's full-screen TUI well; it is an optional,
+feature-detected dependency (like markdown-mode), not a hard requirement, so the
+no-new-dependencies rule holds.  `term' is the always-present fallback, with the
+caveat that it renders a complex TUI less well and - with tmux dropped (D24) -
+has no external-attach escape hatch.
