@@ -276,9 +276,24 @@ Interactively, report the result in the echo area."
   "Return a short, buffer-name-friendly form of SESSION-ID."
   (substring session-id 0 (min 8 (length session-id))))
 
+(defcustom tincan-buffer-title-width 16
+  "Columns the session title is abbreviated to in the viewer buffer name."
+  :type 'integer
+  :group 'tincan)
+
+(defun tincan--buffer-name (session-id title)
+  "Return the viewer buffer name for SESSION-ID, using TITLE when non-empty.
+TITLE is abbreviated to `tincan-buffer-title-width' columns; with no usable
+TITLE the short id is used."
+  (let* ((trimmed (and (stringp title) (string-trim title)))
+         (label (if (and trimmed (not (string-empty-p trimmed)))
+                    (truncate-string-to-width trimmed tincan-buffer-title-width)
+                  (tincan--short-id session-id))))
+    (format "*tincan: %s*" label)))
+
 ;; ** Session selection
 (defun tincan--list-sessions ()
-  "Return an alist of (DISPLAY . ID) for this project's sessions.
+  "Return an alist of (DISPLAY . (ID . TITLE)) for this project's sessions.
 DISPLAY is \"TIMESTAMP  TITLE\".  Runs tincan.py in `default-directory',
 whose sessions are the ones it lists."
   (with-temp-buffer
@@ -293,13 +308,13 @@ whose sessions are the ones it lists."
                  (fields (split-string line "\t")))
             (when (>= (length fields) 3)
               (push (cons (format "%s  %s" (nth 1 fields) (nth 2 fields))
-                          (nth 0 fields))
+                          (cons (nth 0 fields) (nth 2 fields)))
                     sessions)))
           (forward-line 1))
         (nreverse sessions)))))
 
 (defun tincan--read-session ()
-  "Prompt for one of this project's sessions and return its id."
+  "Prompt for one of this project's sessions; return (ID . TITLE)."
   (let ((sessions (tincan--list-sessions)))
     (unless sessions
       (user-error "tincan: no sessions for %s" default-directory))
@@ -440,14 +455,21 @@ For `kill-buffer-hook'."
     (file-notify-rm-watch tincan--notify-watch)
     (setq tincan--notify-watch nil)))
 
+(defun tincan--session-buffer (session)
+  "Return an existing tincan buffer bound to SESSION, or nil."
+  (seq-find (lambda (buffer)
+              (equal (buffer-local-value 'tincan--session-id buffer) session))
+            (buffer-list)))
+
 (defun tincan--watch (session buffer-name)
-  "Set up BUFFER-NAME to watch SESSION (an id or transcript path); return it.
-Reuse the buffer if it is already watching with a live process."
-  (let ((existing (get-buffer buffer-name)))
+  "Set up a buffer watching SESSION (an id or transcript path); return it.
+Reuse the buffer already bound to SESSION - matched by id, not name, since the
+title (hence the name) can change; BUFFER-NAME names a freshly created one."
+  (let ((existing (tincan--session-buffer session)))
     (if (and existing
              (process-live-p (buffer-local-value 'tincan--process existing)))
         existing
-      (let ((buffer (get-buffer-create buffer-name)))
+      (let ((buffer (or existing (generate-new-buffer buffer-name))))
         (with-current-buffer buffer
           (let ((inhibit-read-only t))
             (erase-buffer))
@@ -470,13 +492,14 @@ Reuse the buffer if it is already watching with a live process."
         buffer))))
 
 ;;;###autoload
-(defun tincan (session-id)
+(defun tincan (session-id &optional title)
   "Watch a Claude Code SESSION-ID live in a read-only buffer.
+TITLE, if given, is shown (abbreviated) in the buffer name.
 Interactively, choose among this project's sessions."
-  (interactive (list (tincan--read-session)))
+  (interactive (let ((choice (tincan--read-session)))
+                 (list (car choice) (cdr choice))))
   (pop-to-buffer
-   (tincan--watch session-id
-                  (format "*tincan: %s*" (tincan--short-id session-id)))))
+   (tincan--watch session-id (tincan--buffer-name session-id title))))
 
 ;; * Footer
 (provide 'tincan)

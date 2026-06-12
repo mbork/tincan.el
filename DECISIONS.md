@@ -280,6 +280,19 @@ on older Emacs.
 Rationale: a personal tool run on current Emacs - no reason to carry a lower
 floor, and the folding is simpler for leaning on the built-in cycle keys.
 
+### D27 - Session title: prefer the renamed title; use it in the buffer name
+`read_session_meta' prefers `customTitle' (written by `/rename') over `aiTitle'
+(auto-generated), then the first user prompt, then the session id.  Each kind is
+optional and every combination occurs in practice (some sessions have neither
+title; one can have a custom title but no AI title), so it is a graceful
+fallback chain.  The Emacs viewer names its buffer `*tincan: <title>*' with the
+title abbreviated to `tincan-buffer-title-width' columns (default 16; short id
+when there is no title).
+Because the title can change mid-session (a later `/rename'), buffer reuse is
+keyed on the session id held buffer-locally, not on the buffer name - so
+re-watching a renamed session reuses its buffer instead of spawning a duplicate
+(`generate-new-buffer' names only genuinely new ones).
+
 ## Input mode (user -> Claude)
 
 These decisions are agreed but not yet implemented; they record the chosen shape

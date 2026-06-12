@@ -247,7 +247,8 @@ def follow_transcript(path):
 # ** Metadata extraction
 def read_session_meta(path):
     cwd = None
-    title = None
+    custom_title = None
+    ai_title = None
     timestamp = None
     first_prompt = None
     with open(path, encoding="utf-8", errors="replace") as transcript:
@@ -263,14 +264,17 @@ def read_session_meta(path):
                 cwd = record["cwd"]
             if timestamp is None and record.get("timestamp"):
                 timestamp = record["timestamp"]
+            # A /rename writes a "custom-title" record; keep the latest of each
+            # title kind and prefer the user's custom title below.
+            if record.get("type") == "custom-title" and record.get("customTitle"):
+                custom_title = record["customTitle"]
             if record.get("type") == "ai-title" and record.get("aiTitle"):
-                title = record["aiTitle"]
+                ai_title = record["aiTitle"]
             if first_prompt is None and record.get("type") == "user":
                 content = get_content(record)
                 if isinstance(content, str) and content.strip():
                     first_prompt = content.strip()
-    if not title:
-        title = first_prompt or path.stem
+    title = custom_title or ai_title or first_prompt or path.stem
     return {"id": path.stem, "cwd": cwd, "title": title, "timestamp": timestamp}
 
 # ** Formatting
