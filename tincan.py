@@ -119,6 +119,7 @@ def render_tool_use(block):
     return format_block(ROLE_TOOL_USE + " " + name, body, lang="json")
 
 def render_tool_result(block):
+    # A tool_result's content is either a plain string or a list of text blocks.
     content = block.get("content")
     if isinstance(content, str):
         body = content
@@ -140,6 +141,7 @@ def render_user_block(block):
     if block_type == "text":
         return format_block(ROLE_USER, block.get("text", ""))
     if block_type == "tool_result":
+        # Tool results are delivered to the model as a "user" message (API shape).
         return render_tool_result(block)
     return None
 
