@@ -72,17 +72,21 @@ rule is what actually guarantees we never parse incomplete JSON.  Speculative
 truncation handling was removed because it cannot occur in practice and a
 half-correct version (it missed in-place larger rewrites) is worse than none.
 
-### D11 - `--show-sessions`
-Lists only the *current* project's sessions, i.e. those whose `cwd` field
-equals the process working directory (matching `claude --resume`).  Output is
-tab-separated `id<TAB>timestamp<TAB>title`, one per line, newest first.
-The title is the `aiTitle` if present, else the first user prompt (collapsed to
-one line and truncated), else the session id.  Timestamps are the first
-record's timestamp, shown in local time as ISO-8601 with offset.
-Rationale: the id is needed so the caller (Emacs) can pick a session; tabs make
-parsing trivial; restricting to the current project is the relevant set for
-driving Claude Code from a project buffer.  Each file is fully scanned because
-`aiTitle` can appear late; acceptable for the expected handful of sessions.
+### D11 - `--show-sessions` (deepest-ancestor by default; `--all` for everything)
+By default lists the sessions of the *closest* launch directory at or above the
+working directory: among sessions whose `cwd' is an ancestor-or-equal of the cwd
+(component-aware via `os.path.commonpath', so `M-x tincan' works from any
+subproject directory), the ones with the deepest such `cwd'.  `--all' instead
+lists every project's sessions.  Output is tab-separated
+`id<TAB>timestamp<TAB>title<TAB>cwd', one per line, newest first.
+The title is `customTitle' (a `/rename'), else `aiTitle', else the first user
+prompt (collapsed/truncated), else the id (see D27).  Timestamps are the first
+record's, in local time as ISO-8601 with offset.
+Rationale: exact-cwd matching broke when run below the project root; ancestor
+matching is symlink-safe for free because both `os.getcwd()' and the recorded
+`cwd' are physical paths.  The `cwd' column lets the Emacs all-projects picker
+narrow by directory.  Each file is fully scanned because `aiTitle'/`customTitle'
+can appear late; acceptable for the expected handful of sessions.
 
 ## Emacs view mode
 
@@ -301,7 +305,21 @@ keyed on the session id held buffer-locally, not on the buffer name - so
 re-watching a renamed session reuses its buffer instead of spawning a duplicate
 (`generate-new-buffer' names only genuinely new ones).
 
-## Input mode (user -> Claude)
+### D28 - `M-x tincan' session picking: deepest-ancestor, `C-u' for all
+`M-x tincan' lists this project's sessions (D11's deepest-ancestor match), so it
+works from any subdirectory.  With a prefix argument (`C-u') it offers *every*
+project's session instead - the escape hatch for "I am not in the project" or
+"I want another project's session".
+For the all-projects picker the candidate string is \"TITLE  DIR\" (abbreviated
+directory), because completion backends match input against the candidate
+*string*: putting both title and directory there lets you narrow by either in
+vanilla `completing-read', Vertico, Ivy or Helm alike (annotations are display
+only and are not matched).  How flexibly a mid-string field narrows depends on
+`completion-styles' (Ivy/Helm and orderless do it out of the box; vanilla wants
+`flex'/`substring'), which is the user's config, not tincan's concern.
+Chosen over detecting a project "root" (vc/project.el/dominating file) because
+those are heuristics that can disagree with the directory Claude actually
+launched in, whereas the ancestor match reads the real recorded `cwd'.
 
 These decisions are agreed but not yet implemented; they record the chosen shape
 of sending textual replies back to Claude Code.

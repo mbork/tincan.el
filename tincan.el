@@ -304,12 +304,15 @@ TITLE the short id is used."
     (format "*tincan: %s*" label)))
 
 ;; ** Session selection
-(defun tincan--list-sessions ()
-  "Return an alist of (DISPLAY . (ID . TITLE)) for this project's sessions.
-DISPLAY is \"TIMESTAMP  TITLE\".  Runs tincan.py in `default-directory',
-whose sessions are the ones it lists."
+(defun tincan--list-sessions (&optional all)
+  "Return an alist of (DISPLAY . (ID . TITLE)) for sessions.
+Without ALL, list the sessions of the closest launch directory at or above
+`default-directory' (DISPLAY is \"TIMESTAMP  TITLE\").  With ALL, list every
+project's sessions and put the directory in DISPLAY (\"TITLE  DIR\") so it
+narrows by title or directory.  Runs tincan.py in `default-directory'."
   (with-temp-buffer
-    (let ((code (call-process "python3" nil t nil tincan-script "--show-sessions")))
+    (let* ((args (append '("--show-sessions") (and all '("--all"))))
+           (code (apply #'call-process "python3" nil t nil tincan-script args)))
       (unless (= code 0)
         (error "tincan: --show-sessions failed: %s" (string-trim (buffer-string))))
       (let ((sessions '()))
@@ -319,17 +322,27 @@ whose sessions are the ones it lists."
                         (line-beginning-position) (line-end-position)))
                  (fields (split-string line "\t")))
             (when (>= (length fields) 3)
-              (push (cons (format "%s  %s" (nth 1 fields) (nth 2 fields))
-                          (cons (nth 0 fields) (nth 2 fields)))
-                    sessions)))
+              (let ((id (nth 0 fields))
+                    (timestamp (nth 1 fields))
+                    (title (nth 2 fields))
+                    (cwd (nth 3 fields)))
+                (push (cons (if (and all cwd (not (string-empty-p cwd)))
+                                (format "%s  %s" title (abbreviate-file-name cwd))
+                              (format "%s  %s" timestamp title))
+                            (cons id title))
+                      sessions))))
           (forward-line 1))
         (nreverse sessions)))))
 
-(defun tincan--read-session ()
-  "Prompt for one of this project's sessions; return (ID . TITLE)."
-  (let ((sessions (tincan--list-sessions)))
+(defun tincan--read-session (&optional all)
+  "Prompt for a session; return (ID . TITLE).
+With ALL, choose among every project's sessions instead of this project's."
+  (let ((sessions (tincan--list-sessions all)))
     (unless sessions
-      (user-error "tincan: no sessions for %s" default-directory))
+      (if all
+          (user-error "tincan: no sessions found")
+        (user-error "tincan: no sessions under %s (use C-u for all projects)"
+                    default-directory)))
     (cdr (assoc (completing-read "tincan session: " sessions nil t) sessions))))
 
 ;; ** State and mode line
@@ -507,9 +520,11 @@ title (hence the name) can change; BUFFER-NAME names a freshly created one."
 (defun tincan (session-id &optional title)
   "Watch a Claude Code SESSION-ID live in a read-only buffer.
 TITLE, if given, is shown (abbreviated) in the buffer name.
-Interactively, choose among this project's sessions."
-  (interactive (let ((choice (tincan--read-session)))
-                 (list (car choice) (cdr choice))))
+Interactively choose among this project's sessions; with a prefix argument,
+choose among all projects' sessions (narrow by title or directory)."
+  (interactive
+   (let ((choice (tincan--read-session current-prefix-arg)))
+     (list (car choice) (cdr choice))))
   (pop-to-buffer
    (tincan--watch session-id (tincan--buffer-name session-id title))))
 

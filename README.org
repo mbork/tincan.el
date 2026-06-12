@@ -21,15 +21,18 @@ for the viewer.  For the nicest rendering, install [[https://github.com/jrblevin
 ** Selecting a session
 
 =tincan.py= reads Claude Code's own transcript files under
-=~/.claude/projects/=.  Run it from your project directory to list that
-project's sessions, most recent first:
+=~/.claude/projects/=.  Run it from your project (or any subdirectory) to list
+that project's sessions, most recent first; add =--all= for every project:
 
 #+begin_src sh
-./tincan.py --show-sessions
+./tincan.py --show-sessions          # sessions of the enclosing project
+./tincan.py --show-sessions --all    # every project's sessions
 #+end_src
 
-Each line is =SESSION-ID<TAB>TIMESTAMP<TAB>TITLE=.  A session can be named by
-its id, a unique id prefix, or a path to a =.jsonl= transcript.
+Each line is =SESSION-ID<TAB>TIMESTAMP<TAB>TITLE<TAB>CWD=.  Without =--all= it
+lists the sessions of the closest launch directory at or above the working
+directory.  A session can be named by its id, a unique id prefix, or a path to a
+=.jsonl= transcript.
 
 ** Following a transcript with =tail -f=
 
@@ -70,9 +73,17 @@ Then watch a session live with one command:
 M-x tincan
 #+end_src
 
-Run it from the project root (where you start Claude Code).  It lists that
-project's sessions, lets you pick one, launches =tincan.py --follow=, and
-shows the rendered transcript in a read-only buffer that updates as Claude works.
+Run it from the project (any subdirectory works).  It lists that project's
+sessions, lets you pick one, launches =tincan.py --follow=, and shows the
+rendered transcript in a read-only buffer that updates as Claude works.  With a
+prefix argument (=C-u M-x tincan=) it offers every project's session instead -
+narrow by title or directory - for when you are outside the project tree.
+
+Narrowing by directory in that picker depends on your completion setup: Ivy,
+Helm and Vertico (with =orderless=) match anywhere out of the box, while vanilla
+=completing-read= wants =flex= or =substring= in =completion-styles= to match a
+directory in the middle of a candidate.
+
 The mode line shows the agent's state: =[working]=, =[idle]= (after a =@@@ DONE=
 turn-end marker, derived from Claude Code's =turn_duration= record), and - if the
 optional hook below is installed - =[needs input]= when Claude is waiting for you

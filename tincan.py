@@ -296,14 +296,33 @@ def oneline(text, limit=70):
     return flattened
 
 # ** Listing
-def show_sessions():
-    here = os.getcwd()
+def is_ancestor(parent, child):
+    # True if PARENT equals CHILD or is an ancestor of it (path-component aware,
+    # so /a/b is not treated as an ancestor of /a/bc).  Both are physical paths
+    # (os.getcwd() and the recorded cwd resolve symlinks), so this is symlink
+    # safe without extra work.
+    try:
+        return os.path.commonpath([parent, child]) == parent
+    except ValueError:
+        return False
+
+def show_sessions(show_all=False):
     metas = [read_session_meta(path) for path in iter_session_files()]
-    mine = [meta for meta in metas if meta["cwd"] == here]
-    mine.sort(key=lambda meta: meta["timestamp"] or "", reverse=True)
-    for meta in mine:
-        line = "{}\t{}\t{}\n".format(
-            meta["id"], format_timestamp(meta["timestamp"]), oneline(meta["title"]))
+    if show_all:
+        selected = metas
+    else:
+        # Sessions launched at or above the working directory; among those, list
+        # the ones from the closest launch directory (the deepest matching cwd),
+        # so the command works from any subdirectory of the project.
+        here = os.getcwd()
+        ancestors = [m for m in metas if m["cwd"] and is_ancestor(m["cwd"], here)]
+        root = max((m["cwd"] for m in ancestors), key=len, default=None)
+        selected = [m for m in ancestors if m["cwd"] == root] if root else []
+    selected.sort(key=lambda meta: meta["timestamp"] or "", reverse=True)
+    for meta in selected:
+        line = "{}\t{}\t{}\t{}\n".format(
+            meta["id"], format_timestamp(meta["timestamp"]),
+            oneline(meta["title"]), meta["cwd"] or "")
         emit(line)
 
 # * Notification hook
@@ -431,7 +450,10 @@ def build_parser():
         help="keep watching the session and append new output (like tail -f)")
     parser.add_argument(
         "--show-sessions", action="store_true",
-        help="list this project's sessions (id, timestamp, title) and exit")
+        help="list sessions (id, timestamp, title, cwd) and exit")
+    parser.add_argument(
+        "--all", action="store_true",
+        help="with --show-sessions, list every project's sessions, not just here")
     parser.add_argument(
         "--notification-hook", action="store_true",
         help="run as a Claude Code Notification hook (reads event JSON on stdin)")
@@ -466,7 +488,7 @@ def main():
             sys.exit(uninstall_hook(settings_path))
         sys.exit(check_hook(settings_path))
     if args.show_sessions:
-        show_sessions()
+        show_sessions(args.all)
         return
     if not args.session:
         parser.error("a session id is required (or use --show-sessions)")
