@@ -92,7 +92,7 @@ markers stay out of the way until you open them, including as they stream in.
 Customize which roles stay open with =tincan-unfolded-sections=.
 
 Markdown headings inside messages fold too: =TAB= on a Markdown heading
-(e.g. =##=) cycles that heading's subtree, via Markdown's own =markdown-cycle=.
+(e.g. =##=) folds that heading's subtree; headings nest below the =@@@= sections.
 
 To render a static transcript file instead (for example one you streamed to disk
 with =--follow > file=), open it and call =tincan-render-buffer= yourself,

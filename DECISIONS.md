@@ -253,15 +253,23 @@ when transcript activity resumes.  The watch is best-effort: if the optional hoo
 (D20) is not installed or watching is unsupported, only working/idle show.
 
 ### D22 - Foldable `@@@` sections, folded by default except USER/ASSISTANT
-The viewer folds `@@@` sections with `outline-minor-mode' (`outline-regexp' set
-to `@@@ ', all headings level 1).  `outline-minor-mode-cycle' (Emacs 28.1+)
-binds TAB on a section's heading to `outline-cycle' and S-TAB to
-`outline-cycle-buffer'.  This wins over the major mode's TAB on headings because
-outline installs the binding on the heading via an overlay keymap (higher
-precedence than the major-mode map); off a heading TAB falls through to the
-mode (e.g. `markdown-cycle').  It works in GUI too: `markdown-mode' binds TAB as
-`[9]' (not `<tab>'), so a GUI `<tab>' with no binding is translated to `[9]'
-and lands on `outline-cycle' on a heading.  Every section whose role is not in
+The viewer folds with `outline-minor-mode'.  `outline-regexp' matches both `@@@ '
+section markers and Markdown `#' headings, and `tincan--outline-level' makes the
+`@@@' sections level 1 with Markdown headings nested below - so TAB folds either
+a section or a heading within it.  Markdown headings deliberately go through
+`outline-cycle' (not Markdown's `markdown-cycle'): `markdown-cycle' navigates via
+`outline-regexp'/`outline-level', which we have repurposed, so it would jump to
+the wrong place and error (`markdown-end-of-subtree' on a nil position).  The
+trade-off is that a `#'-prefixed line inside a code block also looks like a
+heading, which is harmless (it just becomes foldable).
+`outline-minor-mode-cycle' (Emacs 28.1+) binds TAB on a heading to
+`outline-cycle' and S-TAB to `outline-cycle-buffer'.  This wins over the major
+mode's TAB on headings because outline installs the binding on the heading via
+an overlay keymap (higher precedence than the major-mode map); off a heading TAB
+falls through to the mode (e.g. `markdown-cycle').  It works in GUI too:
+`markdown-mode' binds TAB as `[9]' (not `<tab>'), so a GUI `<tab>' with no
+binding is translated to `[9]' and lands on `outline-cycle' on a heading.
+Every section whose role is not in
 `tincan-unfolded-sections' (default `("USER" "ASSISTANT")') starts folded,
 keeping thinking/tool calls/tool results/DONE out of the way.
 Folding is overlay-based, so it works in the read-only buffer with no

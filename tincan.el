@@ -140,10 +140,22 @@ passed are not revisited, so manual unfolding is preserved."
               (save-excursion (goto-char heading) (outline-hide-subtree)))
             (set-marker tincan--fold-marker (line-end-position))))))))
 
+(defun tincan--outline-level ()
+  "Outline level: @@@ sections are level 1; Markdown headings nest below them."
+  (if (looking-at-p "@@@ ")
+      1
+    (1+ (save-excursion
+          (beginning-of-line)
+          (skip-chars-forward "#")))))
+
 (defun tincan--setup-folding ()
-  "Enable @@@-section folding in the current buffer and apply the default fold."
-  (setq-local outline-regexp "@@@ ")
-  (setq-local outline-level (lambda () 1))
+  "Enable folding in the current buffer and apply the default fold.
+Both @@@ section markers and Markdown headings are outline headings, so TAB
+cycles either; @@@ sections are top level and Markdown headings nest within.
+Markdown headings go through `outline-cycle' here rather than `markdown-cycle',
+which would misnavigate because `outline-regexp' is not Markdown's."
+  (setq-local outline-regexp "\\(?:@@@\\|#+\\) ")
+  (setq-local outline-level #'tincan--outline-level)
   (setq-local outline-minor-mode-highlight nil)
   (setq-local outline-minor-mode-cycle t)
   (outline-minor-mode 1)
