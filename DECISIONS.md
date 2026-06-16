@@ -347,3 +347,19 @@ feature-detected dependency (like markdown-mode), not a hard requirement, so the
 no-new-dependencies rule holds.  `term' is the always-present fallback, with the
 caveat that it renders a complex TUI less well and - with tmux dropped (D24) -
 has no external-attach escape hatch.
+
+### D29 - Input-mode design choices (several provisional)
+Resolutions of the open design questions for the reply path.  Items marked
+PROVISIONAL ("for now") are expected to change.
+- Start vs attach: keep `tincan-start' and `tincan-attach' both manual.
+  PROVISIONAL - auto-attach on resume (the id is known) may come later.
+- Reply safety: raise the terminal buffer on each send so a misfire is visible,
+  and bind a key to bury it again quickly.
+- Keybindings: a `C-c t' prefix map plus `C-c SPC' for reply.  PROVISIONAL.
+- Backend: implement the `vterm' path fully now; `term' (D26) stays a thin
+  fallback to fill in later.  PROVISIONAL.
+- No single "current session": support several concurrent tincan sessions at
+  once, so there is deliberately NO global `tincan--current-view'.
+  `tincan-reply' derives its target from the current buffer - the view,
+  terminal and compose buffers all belong to one session group - rather than a
+  global pointer.  Exact targeting mechanism still to be designed.
