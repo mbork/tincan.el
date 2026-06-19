@@ -11,6 +11,7 @@ import shlex
 import shutil
 import sys
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -53,24 +54,38 @@ def iter_session_files():
         return []
     return sorted(root.glob("*/*.jsonl"))
 
-def resolve_session_file(session_arg):
+def resolve_session_file(session_arg, wait=False):
     # A direct path wins.
     candidate = Path(session_arg)
     if candidate.is_file():
         return candidate
-    # Otherwise treat the argument as a session id or a unique id prefix.
-    matches = [path for path in iter_session_files()
-               if path.stem == session_arg or path.stem.startswith(session_arg)]
-    exact = [path for path in matches if path.stem == session_arg]
-    if exact:
-        return exact[0]
-    if len(matches) == 1:
-        return matches[0]
-    if not matches:
-        die("No session matching {!r} found under {}".format(
-            session_arg, get_projects_root()))
-    die("Ambiguous session prefix {!r}; matches:\n{}".format(
-        session_arg, "\n".join(path.stem for path in matches)))
+    # Otherwise treat the argument as a session id or a unique id prefix.  With
+    # WAIT (used when following a session tincan just started with
+    # --session-id), the .jsonl does not exist until Claude's first turn, so
+    # poll for it to appear instead of failing.
+    while True:
+        matches = [path for path in iter_session_files()
+                   if path.stem == session_arg or path.stem.startswith(session_arg)]
+        exact = [path for path in matches if path.stem == session_arg]
+        if exact:
+            return exact[0]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            die("Ambiguous session prefix {!r}; matches:\n{}".format(
+                session_arg, "\n".join(path.stem for path in matches)))
+        # No matches yet.
+        if not wait:
+            die("No session matching {!r} found under {}".format(
+                session_arg, get_projects_root()))
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+# * Session id generation
+def print_new_session_id():
+    # Print a fresh UUID for `claude --session-id <uuid>'.  Generating it here
+    # (Python's uuid4) keeps id generation in the component that already owns
+    # session/file concerns and avoids depending on a system `uuidgen'.
+    print(uuid.uuid4())
 
 # * Rendering
 # ** Block formatting
@@ -449,6 +464,13 @@ def build_parser():
         "-f", "--follow", action="store_true",
         help="keep watching the session and append new output (like tail -f)")
     parser.add_argument(
+        "--wait", action="store_true",
+        help="with --follow, wait for the transcript to appear instead of failing"
+             " (for a just-started session whose file is not written yet)")
+    parser.add_argument(
+        "--new-session-id", action="store_true",
+        help="print a fresh UUID (for claude --session-id) and exit")
+    parser.add_argument(
         "--show-sessions", action="store_true",
         help="list sessions (id, timestamp, title, cwd) and exit")
     parser.add_argument(
@@ -474,6 +496,9 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.new_session_id:
+        print_new_session_id()
+        return
     if args.notification_hook:
         run_notification_hook()
         return
@@ -492,7 +517,7 @@ def main():
         return
     if not args.session:
         parser.error("a session id is required (or use --show-sessions)")
-    path = resolve_session_file(args.session)
+    path = resolve_session_file(args.session, wait=args.wait and args.follow)
     if args.follow:
         follow_transcript(path)
     else:
