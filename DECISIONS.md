@@ -321,8 +321,10 @@ Chosen over detecting a project "root" (vc/project.el/dominating file) because
 those are heuristics that can disagree with the directory Claude actually
 launched in, whereas the ancestor match reads the real recorded `cwd'.
 
-These decisions are agreed but not yet implemented; they record the chosen shape
-of sending textual replies back to Claude Code.
+These decisions record the chosen shape of sending textual replies back to
+Claude Code (the input mode).  D24-D30 are the early design; D31-D38 are the
+final, implemented design, which revises several of them now that the `claude'
+CLI's `--session-id'/`--resume' flags let tincan own the session id.
 
 ### D24 - No tmux: run Claude in an Emacs terminal buffer
 Claude is launched directly in an Emacs terminal-emulator buffer (see D26), not
@@ -333,12 +335,16 @@ The cost, accepted deliberately: no persistence/detach (killing the buffer or
 Emacs ends the Claude session and loses an in-flight run) and no external-
 terminal escape hatch for the TUI.  A kill confirmation is the only safeguard.
 
-### D25 - Split "start Claude" from "attach a view"
-Starting Claude and attaching a tincan view buffer are separate commands.
-Rationale: a freshly started Claude session's transcript id is not known until
-Claude writes the file, so auto-attaching at start is racy.  Making attach a
-manual pick (from `tincan.py --show-sessions', newest first) sidesteps the race
-entirely and doubles as the escape hatch.
+### D25 - Split "start Claude" from "attach a view" (REVISED by D31/D32)
+Original rationale: a freshly started Claude session's transcript id is not known
+until Claude writes the file, so auto-attaching at start is racy; making attach a
+manual pick sidesteps the race and doubles as the escape hatch.
+This is superseded: because tincan now owns the id (`--session-id' for new,
+`--resume' for resume; D31) and the follower waits for the not-yet-written file
+(`--wait'; D32), `tincan-start' auto-attaches in both directions with no race.
+Manual `tincan-attach' survives only as an escape hatch / recovery, and it too is
+deterministic - run from a terminal buffer, it (re)builds the view for *that
+terminal's* stored id, so there is no session picking and no possible mislink.
 
 ### D26 - vterm when available, term as fallback
 The terminal buffer uses `vterm' if it is available, else the built-in `term'.
@@ -348,18 +354,126 @@ no-new-dependencies rule holds.  `term' is the always-present fallback, with the
 caveat that it renders a complex TUI less well and - with tmux dropped (D24) -
 has no external-attach escape hatch.
 
-### D29 - Input-mode design choices (several provisional)
-Resolutions of the open design questions for the reply path.  Items marked
-PROVISIONAL ("for now") are expected to change.
-- Start vs attach: keep `tincan-start' and `tincan-attach' both manual.
-  PROVISIONAL - auto-attach on resume (the id is known) may come later.
-- Reply safety: raise the terminal buffer on each send so a misfire is visible,
-  and bind a key to bury it again quickly.
-- Keybindings: a `C-c t' prefix map plus `C-c SPC' for reply.  PROVISIONAL.
-- Backend: implement the `vterm' path fully now; `term' (D26) stays a thin
-  fallback to fill in later.  PROVISIONAL.
-- No single "current session": support several concurrent tincan sessions at
-  once, so there is deliberately NO global `tincan--current-view'.
-  `tincan-reply' derives its target from the current buffer - the view,
-  terminal and compose buffers all belong to one session group - rather than a
-  global pointer.  Exact targeting mechanism still to be designed.
+### D29 - Input-mode design choices (early draft; see D31-D38 for the final form)
+Most of these were superseded once tincan took ownership of the session id:
+- Start vs attach (now D25/D31): `tincan-start' auto-attaches; manual attach is
+  only an escape hatch.
+- Reply safety (now D35): show the terminal on send *without stealing focus*,
+  with a one-shot next-command dismissal, instead of "raise then bury".
+- Keybindings (now D37): no global prefix; per-buffer maps with `C-c SPC' reply.
+- Backend (still): the `vterm' path is implemented; `term' (D26) is deferred.
+- No single "current session" (kept, now D33): no global `tincan--current-view';
+  `tincan-reply' resolves its target from the current buffer.  Final mechanism in
+  D33 - two origins (view, terminal), not three, since compose has its own send.
+
+### D30 - Distinguishing the transcript view from the terminal
+The view (rendered, read-only) and the vterm terminal show the same conversation
+and are easy to confuse, especially in scrollback where the `@@@' markers scroll
+out of sight.  Each buffer therefore carries an always-visible header line
+identifying it (view: read-only transcript; terminal: type here).  A header line
+is the strongest cue because it does not scroll (unlike the markers) and is more
+prominent than the mode line; it is reinforced by distinct buffer-name prefixes
+and the view's read-only-ness.  An optional `buffer-face-mode' background tint
+(off by default) is scaffolded as an extra ambient cue - off because tints fight
+themes and vterm's own colors.  Exact header-line contents are settled within the
+implementing commit.
+
+### D31 - tincan owns the session id (`--session-id` / `--resume`)
+For a new session `tincan-start' generates a fresh UUID and launches
+`claude --session-id <uuid>'; to resume, `C-u tincan-start' picks an existing
+session and launches `claude --resume <id>'.  Either way tincan knows the id
+before Claude finishes writing anything, which (a) removes the terminal<->session
+pairing ambiguity entirely (the terminal buffer stores its own id), (b) lets the
+view follow by id immediately, and (c) makes resume a single step.  The JSONL
+filename equals the session id (verified against a real transcript), so
+`--session-id <uuid>' yields `<uuid>.jsonl', which the follower finds by id.
+The UUID comes from `tincan.py --new-session-id' (Python's `uuid4'), keeping id
+generation in the component that already owns session/file concerns and avoiding
+a dependency on a system `uuidgen'.
+Rationale: without this, a vterm is an opaque pty - tincan cannot tell which
+session a running `claude' uses (the id only surfaces as the file name), so any
+attach would pair view and terminal by unverified user assertion, risking
+"read one conversation, type into another".  Owning the id makes the pairing
+correct by construction.
+
+### D32 - Follower waits for a not-yet-written transcript (`--wait`)
+A brand-new session has no `.jsonl' until Claude processes its first turn, so
+following by id must tolerate an absent file.  `tincan.py --follow --wait' polls
+for the file to appear (the same 0.25 s interval as follow mode) instead of
+erroring, then follows normally.  `--wait' is opt-in: the standalone CLI still
+errors fast on a typo'd id, while the Emacs follower always passes `--wait'
+because it always has a genuine id.  This relocates the new-session race into one
+polling loop in the follower rather than deferring attach (revises D25).
+
+### D33 - Session-group linking via buffer-locals; reply resolves from buffer
+There is deliberately no global "current session" - concurrent sessions are
+supported - so each buffer in a group carries buffer-locals instead of a global
+pointer.  The view holds `tincan--session-id', the follower `tincan--process',
+`tincan--state', and `tincan--terminal' (its terminal buffer).  The terminal
+holds `tincan--terminal-p', `tincan--session-id', and `tincan--view' (its view
+buffer).  The compose buffer captures `tincan--terminal' and `tincan--view' when
+spawned.  `tincan-reply' resolves its target from the current buffer: from the
+view -> (view, view's terminal); from the terminal -> (terminal's view,
+terminal).  Compose has its own send command, so the resolver handles two
+origins, not three (this finalizes D29's und. mechanism).
+
+### D34 - Reply gate and compose buffer
+`tincan-reply' (run from the view or the terminal) gates on the view's state:
+`needs-input' -> do not compose; surface the terminal so you answer the prompt
+there (a pasted reply would be wrong during a permission prompt).  `working' ->
+confirm "send anyway?" (Claude queues mid-turn input, so this is a soft guard).
+`idle'/unknown -> open a compose buffer.  The compose buffer uses a Markdown
+major mode when available (markdown-ts-mode/gfm-mode/markdown-mode, else
+text-mode; the same runtime-dispatch reasoning as D16) plus a
+`tincan-compose-minor-mode' binding `C-c C-c' (send) and `C-c C-k' (cancel).
+Send pastes the text into the terminal with `vterm-send-string' (bracketed paste)
+then `vterm-send-return', and clears/buries the compose buffer.
+
+### D35 - After sending, show the terminal without stealing focus
+On send the terminal is shown for a misfire check, but focus stays on the view
+(where Claude's reply streams, and where the sent USER message will also appear).
+`tincan-show-terminal-on-send' selects how: `display' (default - show in a
+window, do not select), `select' (raise and select), or `none'.  With `display',
+and gated by `tincan-dismiss-terminal-on-next-command' (default t), a one-shot
+`pre-command-hook' makes your next command in the view delete that popped
+terminal window (the command still runs) - a momentary peek that clears the
+instant you move on, with no timer.  `tincan-delete-terminal-window' (`C-c 0')
+dismisses the terminal window on demand at any other time.
+Rationale: a timed auto-bury steals focus unpredictably and bakes in a magic
+number; decoupling "visible" from "selected" achieves "glance, then keep reading"
+without either problem.
+
+### D36 - Distinct names and header lines for the three buffers (extends D30)
+The buffers are named distinctly: view `*tincan view: TITLE*', terminal
+`*tincan terminal: DIR*' (no title exists at start, so the abbreviated directory
+is the stable identity), compose `*tincan compose: TITLE*'.  Each carries an
+identifying header line (view: read-only transcript; terminal: type here;
+compose: send/cancel keys).  Agent state (`[working]'/`[idle]'/`[needs input]')
+is shown in both the view's header line and its mode line via one shared
+formatter so the two cannot drift.  The new-session terminal's header line also
+carries a transient hint (give the session a title; the already-open view follows
+in the background; kill + restart as an escape hatch) until the first turn lands.
+
+### D37 - Keybindings: no global binding, per-buffer maps
+Entry commands (`tincan-view', `tincan-start', `tincan-attach') are M-x only;
+tincan binds no global keys (bind them yourself if wanted).  In-session keys live
+in buffer-local maps.  View and terminal share `C-c SPC' (reply), `C-c o' (go to
+the sibling buffer), and `C-c k' (close the session).  The view adds `C-c 0'
+(dismiss the terminal window) and `q' (bury).  The terminal is a
+`tincan-terminal-mode' minor mode layered over vterm (its lighter doubles as an
+identity cue); it adds `C-c C-c' -> send a real interrupt to Claude, restored
+because binding `C-c ...' keys makes `C-c' an Emacs prefix in the buffer.  The
+compose buffer uses `C-c C-c' (send) and `C-c C-k' (cancel).
+Rationale: `C-c <letter>'/`C-c SPC' are the user keyspace, so they never clash
+with markdown-mode; `C-c C-c'/`C-c C-k' is the familiar org-capture/magit idiom.
+
+### D38 - markdown-ts-mode preferred when available (extends D16)
+Auto-detection prefers `markdown-ts-mode' (Emacs 31, and only when the
+tree-sitter `markdown' grammar is actually ready - `fboundp' alone is not enough)
+over `gfm-mode' over plain `markdown-mode'.  `gfm-mode' beats `markdown-mode'
+because Claude emits GitHub Flavored Markdown (fenced code with info strings,
+tables, strikethrough, task lists, and intraword underscores left literal so
+snake_case is not italicized).  The same detection feeds the view and the compose
+buffer; the view falls back to `tincan-view-mode', compose to `text-mode'.  A
+*view* mode (markup-hiding) is deliberately never the default, even on 31: a
+code-heavy transcript wants the literal characters (D16).

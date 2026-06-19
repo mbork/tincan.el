@@ -6,3 +6,6 @@
 # Python
 __pycache__/
 *.pyc
+
+# tincan working docs (local only)
+INPUT-MODE-PLAN.md
