@@ -720,6 +720,10 @@ HINT, if non-nil, is shown in the header line until the first keystroke."
     (with-current-buffer buffer
       ;; vterm-mode is a major mode, so set our buffer-locals after it.
       (vterm-mode)
+      ;; Our kill guard is the single confirmation; suppress Emacs's separate
+      ;; "buffer has a running process" prompt so killing asks exactly once.
+      (let ((proc (get-buffer-process buffer)))
+        (when proc (set-process-query-on-exit-flag proc nil)))
       (setq-local tincan--terminal-p t)
       (setq-local tincan--session-id session-id)
       (setq-local tincan--terminal-hint hint)
