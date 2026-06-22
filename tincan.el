@@ -974,26 +974,22 @@ The command still runs; going to the terminal on purpose is exempted."
         (add-hook 'pre-command-hook fn nil t)))))
 
 ;; * Switching and closing
+(defun tincan--pop-to-sibling (buffer what)
+  "Show BUFFER in another window and select it (never the current window).
+WHAT names the buffer for the error when it is missing."
+  (unless (buffer-live-p buffer)
+    (user-error "tincan: no %s linked (use M-x tincan-attach)" what))
+  (select-window (display-buffer buffer)))
+
 (defun tincan-switch-terminal ()
-  "Switch to this session's terminal buffer (from the view)."
+  "Show this session's terminal in another window and select it."
   (interactive)
-  (let ((terminal (tincan--this-terminal)))
-    (unless (buffer-live-p terminal)
-      (user-error "tincan: no terminal linked (use M-x tincan-attach)"))
-    (tincan--display-terminal terminal 'select)))
+  (tincan--pop-to-sibling (cdr (tincan--resolve-target)) "terminal"))
 
 (defun tincan-switch-view ()
-  "Bury this terminal and switch to its view buffer (from the terminal)."
+  "Show this session's view in another window and select it."
   (interactive)
-  (let ((view tincan--view)
-        (terminal (current-buffer)))
-    (unless (buffer-live-p view)
-      (user-error "tincan: no view linked (use M-x tincan-attach)"))
-    (let ((window (get-buffer-window terminal)))
-      (bury-buffer terminal)
-      (if (window-live-p window)
-          (progn (set-window-buffer window view) (select-window window))
-        (pop-to-buffer view)))))
+  (tincan--pop-to-sibling (car (tincan--resolve-target)) "view"))
 
 (defun tincan-delete-terminal-window ()
   "Delete the window showing this session's terminal, if any (D35)."
