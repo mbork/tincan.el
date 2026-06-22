@@ -175,6 +175,21 @@ def render_tool_use(block):
         body = json.dumps(tool_input, indent=2, ensure_ascii=False)
     return format_block(ROLE_TOOL_USE + " " + name, body, lang="json")
 
+def maybe_prettify_json(text):
+    # If TEXT is a JSON object or array, return (pretty-printed, "json"); else
+    # (TEXT, "").  Only objects/arrays are reformatted - a bare string or number
+    # that happens to parse as JSON is left verbatim (it is just text).
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "{[":
+        return text, ""
+    try:
+        parsed = json.loads(stripped)
+    except ValueError:
+        return text, ""
+    if isinstance(parsed, (dict, list)):
+        return json.dumps(parsed, indent=2, ensure_ascii=False), "json"
+    return text, ""
+
 def render_tool_result(block):
     # A tool_result's content is either a plain string or a list of text blocks.
     content = block.get("content")
@@ -190,7 +205,9 @@ def render_tool_result(block):
     if block.get("is_error"):
         # Mark errors on the marker line, not inside the fenced body.
         header = ROLE_TOOL_RESULT + " (error)"
-    return format_block(header, body, lang="")
+    # Pretty-print JSON results (fenced as json); leave plain text verbatim.
+    body, lang = maybe_prettify_json(body)
+    return format_block(header, body, lang=lang)
 
 # ** User and assistant records
 def render_user_block(block):
