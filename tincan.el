@@ -544,9 +544,13 @@ For `kill-buffer-hook'."
     (setq tincan--notify-watch nil)))
 
 (defun tincan--session-buffer (session)
-  "Return an existing tincan buffer bound to SESSION, or nil."
+  "Return an existing tincan VIEW buffer bound to SESSION, or nil.
+Terminal buffers also carry `tincan--session-id', so they are excluded here -
+otherwise `tincan--watch' would try to render the vterm terminal as a view
+\(\"You cannot change major mode in vterm buffers\")."
   (seq-find (lambda (buffer)
-              (equal (buffer-local-value 'tincan--session-id buffer) session))
+              (and (equal (buffer-local-value 'tincan--session-id buffer) session)
+                   (not (buffer-local-value 'tincan--terminal-p buffer))))
             (buffer-list)))
 
 (defun tincan--watch (session buffer-name)
