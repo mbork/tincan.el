@@ -124,9 +124,51 @@ def get_content(record):
     return None
 
 # ** Tool blocks
+# Map a file extension to a Markdown code-fence language so the Emacs side can
+# fontify it natively; an unknown extension yields a plain, language-less fence.
+EXT_TO_LANG = {
+    ".py": "python", ".el": "emacs-lisp",
+    ".js": "js", ".jsx": "js", ".mjs": "js", ".cjs": "js",
+    ".ts": "typescript", ".tsx": "typescript",
+    ".json": "json", ".md": "markdown", ".markdown": "markdown", ".org": "org",
+    ".sh": "sh", ".bash": "sh", ".zsh": "sh",
+    ".c": "c", ".h": "c",
+    ".cc": "c++", ".cpp": "c++", ".cxx": "c++", ".hpp": "c++", ".hh": "c++",
+    ".rb": "ruby", ".rs": "rust", ".go": "go", ".java": "java", ".kt": "kotlin",
+    ".html": "html", ".htm": "html", ".css": "css", ".scss": "scss",
+    ".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".sql": "sql",
+    ".lua": "lua", ".php": "php", ".pl": "perl", ".pm": "perl",
+    ".clj": "clojure", ".scm": "scheme", ".rkt": "racket", ".hs": "haskell",
+    ".tex": "latex", ".xml": "xml",
+}
+
+def lang_for_path(path):
+    if not path:
+        return ""
+    return EXT_TO_LANG.get(Path(path).suffix.lower(), "")
+
+# Tools whose input is dominated by file content: render that content as a code
+# block (in the file's language) instead of escaped JSON.  Maps tool name to the
+# input fields holding the path and the content.
+CONTENT_TOOLS = {
+    "Write": ("file_path", "content"),
+}
+
 def render_tool_use(block):
     name = block.get("name", "?")
     tool_input = block.get("input")
+    spec = CONTENT_TOOLS.get(name)
+    if spec and isinstance(tool_input, dict):
+        # Render the file content as a fenced code block, with the path on the
+        # marker line and the language taken from the file extension.
+        path_field, content_field = spec
+        path = tool_input.get(path_field) or ""
+        content = tool_input.get(content_field, "")
+        header = ROLE_TOOL_USE + " " + name
+        if path:
+            header += " " + path
+        return format_block(header, content, lang=lang_for_path(path))
+    # Default: pretty-print the input as JSON.
     if tool_input is None:
         body = ""
     else:

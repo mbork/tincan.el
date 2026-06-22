@@ -477,3 +477,21 @@ snake_case is not italicized).  The same detection feeds the view and the compos
 buffer; the view falls back to `tincan-view-mode', compose to `text-mode'.  A
 *view* mode (markup-hiding) is deliberately never the default, even on 31: a
 code-heavy transcript wants the literal characters (D16).
+
+### D39 - Render content-bearing tool uses as code, not JSON (extends D7/D18)
+A `Write' tool_use is rendered as the file *content* in a fenced code block, with
+the language inferred from the file extension and the file path appended to the
+`@@@ TOOL_USE' marker line; an unknown extension yields a language-less fence.
+This is driven by a `CONTENT_TOOLS' map (tool name -> path field, content field)
+plus an `EXT_TO_LANG' map, so adding other single-content tools is a one-line
+change.  All other tools keep the pretty-printed JSON rendering of D7/D18.
+Rationale: a `Write''s input is dominated by the file body, which as JSON is
+escaped, single-line-per-field and unreadable, and cannot be fontified by
+language.  As a fenced code block it reads naturally and gets native per-language
+fontification (D17) on the Emacs side, while the path on the marker line keeps
+the font-lock/outline/state regexes intact (they match the marker prefix and
+ignore trailing text).  The fence length still follows the CommonMark rule (D18),
+so file content containing backticks widens the fence.
+Not handled: `Edit'/`MultiEdit' carry two payloads (old/new string), so they do
+not fit the single-content map and still render as JSON; a two-block renderer
+could be added later.
