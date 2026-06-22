@@ -13,6 +13,72 @@ script, the font-locked viewer, the working/idle and needs-input signals, and
 the read-only =M-x tincan= command that ties them together.  Sending replies
 back to Claude Code (part 3) is not written yet.
 
+* Why both the view and the terminal
+
+# (Terse draft notes; expand into prose.)
+
+- Faithful history
+  - from the transcript (JSONL), not the terminal repaint
+  - immune to repaint bugs (duplicated/missing lines)
+  - main motivation
+- Comfortable reply composition
+  - dedicated buffer, not the TUI line editor
+  - editing directly in vterm/term is awkward
+- Free view bonuses: folding, search, rendering, navigation
+- Asymmetry between the two surfaces
+  - terminal = ground truth + sole input channel
+  - view = faithful, navigable reading
+  - neither replaces the other
+- Caveat: the view is faithful only to what reaches the JSONL
+  - TUI-only content absent (e.g. permission prompts)
+  - hence the separate "needs-input" hack
+- tincan.py stands alone
+  - tincan.py + tail -f useful for non-Emacs users too
+- Claude Code ToS conformance
+  - advantage over tools like agent-shell
+  - real Claude Code in a terminal, not a separate API client
+  - the official CLI drives Claude
+
+* Input mode - usage
+
+# (Terse draft notes; expand into prose.)
+
+Commands:
+- =M-x tincan-start= - run Claude in a vterm, attach a view
+  - new session: generates an id, runs =claude --session-id <id>=, shows terminal
+  - =C-u M-x tincan-start= - resume (=claude --resume <id>=), shows view, terminal buried
+- =M-x tincan-view= - observe a session, read-only
+- =M-x tincan-attach= - from a terminal buffer: (re)build and link its view
+- =tincan-reply= - compose and send a reply
+
+Keys (view and terminal):
+- =C-c SPC= - reply (opens a compose buffer)
+- =C-c o= - go to the sibling buffer (view <-> terminal)
+- =C-c k= - close the session (ends Claude in the terminal)
+- =C-c 0= (view) - delete the terminal window
+- =q= (view) - bury the view
+- =C-c C-c= (terminal) - send a real interrupt (C-c) to Claude
+
+Compose buffer:
+- =C-c C-c= - send to the terminal (bracketed paste + Return)
+- =C-c C-k= - cancel
+
+Options:
+- =tincan-claude-command= - the program (default =claude=)
+- =tincan-show-terminal-on-send= - =display= / =select= / =none= (default =display=)
+- =tincan-dismiss-terminal-on-next-command= - next view command deletes the
+  terminal window (default =t=)
+
+Requirements and notes:
+- vterm needed for the terminal (without it: read-only =tincan-view= only)
+- =markdown-ts-mode= (Emacs 31) or =gfm-mode= improves rendering
+- flow: view -> reply -> compose -> =C-c C-c= -> terminal -> =C-c o= back
+
+Fix in the existing English text:
+- drop "via tmux" (no longer tmux)
+- input mode (part 3) is now implemented
+- rename =M-x tincan= to =M-x tincan-view=
+
 * Usage
 
 Requirements: Python 3 (standard library only) for the script, and Emacs 30.1+
