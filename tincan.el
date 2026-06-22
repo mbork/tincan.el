@@ -883,15 +883,29 @@ working, confirm first; otherwise open a compose buffer."
   :lighter " Tincan-Compose"
   :keymap tincan-compose-mode-map)
 
+(defun tincan--compose-buffer-for (terminal)
+  "Return a live compose buffer targeting TERMINAL, or nil.
+Keyed on the terminal so concurrent sessions keep separate drafts."
+  (seq-find (lambda (buffer)
+              (and (buffer-local-value 'tincan-compose-minor-mode buffer)
+                   (eq (buffer-local-value 'tincan--terminal buffer) terminal)))
+            (buffer-list)))
+
 (defun tincan--open-compose (view terminal)
-  "Pop a compose buffer targeting the VIEW/TERMINAL session group."
-  (let ((buffer (generate-new-buffer (tincan--compose-buffer-name view terminal))))
-    (with-current-buffer buffer
-      (funcall (tincan--compose-major-mode))
-      (setq-local tincan--view view)
-      (setq-local tincan--terminal terminal)
-      (setq-local header-line-format '((:eval (tincan--compose-header))))
-      (tincan-compose-minor-mode 1))
+  "Pop a compose buffer targeting the VIEW/TERMINAL session group.
+Reuse this session's existing compose buffer (keeping any in-progress draft)
+rather than spawning a duplicate."
+  (let ((buffer (or (tincan--compose-buffer-for terminal)
+                    (with-current-buffer
+                        (generate-new-buffer
+                         (tincan--compose-buffer-name view terminal))
+                      (funcall (tincan--compose-major-mode))
+                      (setq-local tincan--view view)
+                      (setq-local tincan--terminal terminal)
+                      (setq-local header-line-format
+                                  '((:eval (tincan--compose-header))))
+                      (tincan-compose-minor-mode 1)
+                      (current-buffer)))))
     (pop-to-buffer buffer)
     buffer))
 
