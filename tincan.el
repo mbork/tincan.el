@@ -633,6 +633,14 @@ momentary peek that clears as soon as you act in the view (D35)."
   :type 'boolean
   :group 'tincan)
 
+(defcustom tincan-send-return-delay 0.1
+  "Seconds to pause between pasting a reply and sending Return (D34).
+Claude's TUI ignores an Enter bundled with a bracketed paste (so pasted text
+does not auto-submit), so the Return must arrive as a separate event.  Raise
+this if multi-line replies are not submitted; 0 sends the Return immediately."
+  :type 'number
+  :group 'tincan)
+
 ;; Declared by vterm; forward declarations keep the byte-compiler quiet.
 (defvar vterm-shell)
 (declare-function vterm-mode "ext:vterm")
@@ -924,6 +932,10 @@ rather than spawning a duplicate."
       (user-error "tincan: Claude process is not running"))
     (with-current-buffer terminal
       (vterm-send-string text t)
+      ;; Send Return as a separate event: Claude ignores an Enter bundled with
+      ;; the bracketed paste, so a brief pause is needed for it to submit.
+      (when (> tincan-send-return-delay 0)
+        (sleep-for tincan-send-return-delay))
       (vterm-send-return))
     (kill-buffer compose)
     (tincan--after-send view terminal)))
