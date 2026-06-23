@@ -1059,16 +1059,13 @@ working, confirm first; otherwise open a compose buffer."
   :keymap tincan-compose-mode-map)
 
 (defun tincan-compose-hide ()
-  "Bury this compose buffer, keeping the draft, and show its linked view (D41).
+  "Bury this compose buffer, keeping the draft, and delete its window (D41).
 Nothing is sent or discarded; bring the draft back with `tincan-reply'
-\(\\[tincan-reply]) in the view, which reopens this same compose buffer."
+\(\\[tincan-reply]) in the view, which reopens this same compose buffer.
+Uses `quit-window', so a popped-up compose window is deleted; if it cannot be
+\(e.g. the sole window) the previous buffer is restored."
   (interactive)
-  (let ((view tincan--view)
-        (window (selected-window)))
-    (bury-buffer)
-    (when (and (buffer-live-p view) (window-live-p window))
-      (set-window-buffer window view)
-      (select-window window))))
+  (quit-window))
 
 (defun tincan--compose-buffer-for (terminal)
   "Return a live compose buffer targeting TERMINAL, or nil.

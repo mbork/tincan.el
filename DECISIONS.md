@@ -537,8 +537,10 @@ a duplicate `--resume' of an already-running session.
 
 ### D41 - Hide the compose buffer without losing the draft
 `tincan-compose-hide' (\`C-c C-z' in the compose buffer) buries the compose
-buffer - it does NOT kill it - and switches that window to the linked view, so
-you can consult the transcript mid-draft.  Restore is free: `tincan-reply'
+buffer - it does NOT kill it - and quits its window via `quit-window' (deleting a
+popped-up compose window, or restoring the previous buffer when it cannot be
+deleted), so you can get the draft out of the way and consult the transcript.
+Restore is free: `tincan-reply'
 (\`r'/\`C-c SPC' in the view) already reuses an existing compose buffer
 (`tincan--compose-buffer-for', keyed by terminal), so it pops the same draft
 back.  `C-c C-z' was chosen over the message-mode idiom `C-c C-d' because the
