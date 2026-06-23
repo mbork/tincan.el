@@ -548,3 +548,19 @@ Known limitation: restore via `tincan-reply' runs the reply gate first, so if
 Claude is now at a needs-input prompt it steers to the terminal instead of
 reopening compose; the buried draft persists and is reachable via normal buffer
 switching.
+
+### D42 - Keep terminal prompts on-screen with `scroll-margin`
+A tincan terminal sets a buffer-local `scroll-margin'
+(`tincan-terminal-scroll-margin', default 8) so Claude's permission prompts and
+menus stay fully visible.  Such a prompt parks the cursor on the first option
+with the remaining options printed below it; with the cursor pinned to the window
+bottom (a terminal's usual behavior) those lower options sit off-screen until you
+navigate down.  A bottom margin makes redisplay scroll so the lines below the
+cursor show.
+It does not disturb normal typing: at end of buffer there is nothing below the
+cursor, so the margin cannot scroll - it only acts when content exists below
+point (the menu case).  Emacs caps it at `maximum-scroll-margin' (25% of the
+window), so short windows degrade gracefully; 0 disables it.
+Chosen over a custom `window-scroll-functions'/recenter hook: `scroll-margin' is
+native and does not fight vterm's redraw.  The hook remains a fallback if the
+margin proves insufficient.

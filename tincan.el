@@ -718,6 +718,16 @@ for a resumed one."
   :type 'string
   :group 'tincan)
 
+(defcustom tincan-terminal-scroll-margin 8
+  "Lines kept below point in a tincan terminal so prompts stay fully visible.
+Claude's permission prompts and menus print several lines below the cursor;
+without a bottom margin the lower options can sit off-screen.  Set as a
+buffer-local `scroll-margin' in the terminal.  It does not disturb normal
+typing: at end of buffer there is nothing below the cursor to scroll to.
+0 disables it."
+  :type 'integer
+  :group 'tincan)
+
 (defcustom tincan-show-terminal-on-send 'display
   "What to do with the terminal after sending a reply (D35).
 `display' shows it in a window without selecting it (focus stays on the view);
@@ -843,6 +853,8 @@ HINT, if non-nil, is shown in the header line until the first keystroke."
       (setq-local tincan--terminal-p t)
       (setq-local tincan--session-id session-id)
       (setq-local tincan--cwd dir)
+      ;; Keep options/prompts that print below the cursor on-screen (D42).
+      (setq-local scroll-margin tincan-terminal-scroll-margin)
       (setq-local tincan--terminal-hint hint)
       (setq-local header-line-format '((:eval (tincan--terminal-header))))
       (tincan-terminal-mode 1)
