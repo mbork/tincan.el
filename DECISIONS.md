@@ -459,7 +459,12 @@ Entry commands (`tincan-view', `tincan-start', `tincan-attach') are M-x only;
 tincan binds no global keys (bind them yourself if wanted).  In-session keys live
 in buffer-local maps.  View and terminal share `C-c SPC' (reply), `C-c o' (go to
 the sibling buffer), and `C-c k' (close the session).  The view adds `C-c 0'
-(dismiss the terminal window) and `q' (bury).  The terminal is a
+(dismiss the terminal window) and, since it is read-only, single-key viewer
+commands: `n'/`p' (line), `SPC'/`DEL' (page), `<'/`>' (ends), `M-n'/`M-p' (any
+heading), `M-{'/`M-}' (USER/ASSISTANT turns only, skipping thinking/tool), `q'
+(bury), `r' (reply), `t' (terminal), `w' (copy the code block at point, else the
+section body), `RET' (`find-file-at-point'), and `?' (`describe-mode').  The
+terminal is a
 `tincan-terminal-mode' minor mode layered over vterm (its lighter doubles as an
 identity cue); it adds `C-c C-c' -> send a real interrupt to Claude, restored
 because binding `C-c ...' keys makes `C-c' an Emacs prefix in the buffer.  It

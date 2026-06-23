@@ -501,10 +501,106 @@ just will not appear if the optional hook is absent or watching is unsupported."
     (define-key map (kbd "C-c k") #'tincan-close)
     (define-key map (kbd "C-c 0") #'tincan-delete-terminal-window)
     (define-key map (kbd "q") #'quit-window)
+    ;; Read-only buffer, so single keys are free for viewer-style navigation
+    ;; (special-mode/Info conventions).  TAB/S-TAB folding is handled by
+    ;; outline-minor-mode-cycle's heading overlay keymap, so it is not set here.
+    (define-key map (kbd "n") #'next-line)
+    (define-key map (kbd "p") #'previous-line)
+    (define-key map (kbd "SPC") #'scroll-up-command)
+    (define-key map (kbd "DEL") #'scroll-down-command)
+    (define-key map (kbd "S-SPC") #'scroll-down-command)
+    (define-key map (kbd "<") #'beginning-of-buffer)
+    (define-key map (kbd ">") #'end-of-buffer)
+    (define-key map (kbd "M-n") #'outline-next-visible-heading)
+    (define-key map (kbd "M-p") #'outline-previous-visible-heading)
+    ;; Reader-style actions and turn-only navigation.
+    (define-key map (kbd "r") #'tincan-reply)
+    (define-key map (kbd "t") #'tincan-switch-terminal)
+    (define-key map (kbd "w") #'tincan-copy-section)
+    (define-key map (kbd "RET") #'find-file-at-point)
+    (define-key map (kbd "?") #'describe-mode)
+    (define-key map (kbd "M-}") #'tincan-next-turn)
+    (define-key map (kbd "M-{") #'tincan-previous-turn)
     map)
   "Keys layered onto a live tincan view buffer (see D37).
 Composed over the major mode's map so reply/switch/close/dismiss work while the
 Markdown view keeps its own bindings.")
+
+(defvar tincan--turn-regexp "^@@@ \\(?:USER\\|ASSISTANT\\)\\b"
+  "Marker lines that begin an actual conversation turn (USER/ASSISTANT).")
+
+(defun tincan-next-turn (&optional n)
+  "Move to the Nth next USER/ASSISTANT marker, skipping tool/thinking sections.
+Interactively N is the prefix argument; a negative N moves backward."
+  (interactive "p")
+  (let* ((n (or n 1))
+         (back (< n 0))
+         (search (if back #'re-search-backward #'re-search-forward)))
+    (dotimes (_ (abs n))
+      (let ((origin (point)))
+        (if back (beginning-of-line) (end-of-line))
+        (if (funcall search tincan--turn-regexp nil t)
+            (goto-char (match-beginning 0))
+          (goto-char origin)
+          (message "tincan: no %s turn" (if back "earlier" "later")))))))
+
+(defun tincan-previous-turn (&optional n)
+  "Move to the Nth previous USER/ASSISTANT marker (see `tincan-next-turn')."
+  (interactive "p")
+  (tincan-next-turn (- (or n 1))))
+
+(defun tincan--code-block-at-point ()
+  "If point is inside a fenced code block, return (BEG . END) of its content.
+The content excludes the fence lines.  Parses the literal ``` / ~~~ fences in
+the buffer text (markup is always visible), pairing each opening fence with a
+closing one of the same character and at least its length (the CommonMark rule),
+so it is major-mode-independent and tolerates code containing shorter fences."
+  (let ((pos (point))
+        (open-re "^[ ]\\{0,3\\}\\(`\\{3,\\}\\|~\\{3,\\}\\)")
+        result)
+    (save-excursion
+      (goto-char (point-min))
+      (catch 'done
+        (while (re-search-forward open-re nil t)
+          (let* ((fence (match-string 1))
+                 (close-re (format "^[ ]\\{0,3\\}%c\\{%d,\\}[ \t]*$"
+                                   (aref fence 0) (length fence)))
+                 (content-beg (progn (forward-line 1) (point))))
+            (if (re-search-forward close-re nil t)
+                (let ((content-end (line-beginning-position)))
+                  (when (and (>= pos content-beg) (< pos content-end))
+                    (setq result (cons content-beg content-end))
+                    (throw 'done nil)))
+              ;; Unterminated fence: content runs to end of buffer.
+              (when (>= pos content-beg)
+                (setq result (cons content-beg (point-max))))
+              (throw 'done nil))))))
+    result))
+
+(defun tincan-copy-section ()
+  "Copy code or section text at point to the kill ring.
+Inside a fenced code block, copy just the code (without the fences); otherwise
+copy the body of the @@@ section at point (without the marker line)."
+  (interactive)
+  (let ((block (tincan--code-block-at-point))
+        start end what)
+    (if block
+        (setq start (car block) end (cdr block) what "code block")
+      (save-excursion
+        (end-of-line)
+        (setq start (if (re-search-backward "^@@@ " nil t)
+                        (line-beginning-position 2)
+                      (point-min)))
+        (goto-char start)
+        (setq end (if (re-search-forward "^@@@ " nil t)
+                      (match-beginning 0)
+                    (point-max))))
+      (setq what "section"))
+    (let ((body (string-trim (buffer-substring-no-properties start end))))
+      (if (string-empty-p body)
+          (message "tincan: empty %s" what)
+        (kill-new body)
+        (message "tincan: copied %s (%d chars)" what (length body))))))
 
 ;; ** Watching a session
 (defun tincan--filter (proc chunk)
