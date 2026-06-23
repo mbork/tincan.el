@@ -534,3 +534,17 @@ DWIM "live group" detection matches a live terminal whose launch `cwd'
 `default-directory'.  This catches a just-started session whose transcript file
 does not exist yet (so it would be invisible to the on-disk listing), preventing
 a duplicate `--resume' of an already-running session.
+
+### D41 - Hide the compose buffer without losing the draft
+`tincan-compose-hide' (\`C-c C-z' in the compose buffer) buries the compose
+buffer - it does NOT kill it - and switches that window to the linked view, so
+you can consult the transcript mid-draft.  Restore is free: `tincan-reply'
+(\`r'/\`C-c SPC' in the view) already reuses an existing compose buffer
+(`tincan--compose-buffer-for', keyed by terminal), so it pops the same draft
+back.  `C-c C-z' was chosen over the message-mode idiom `C-c C-d' because the
+latter shadows markdown-mode's `markdown-do'; a `C-c'-prefixed key is required
+since the compose buffer is editable.
+Known limitation: restore via `tincan-reply' runs the reply gate first, so if
+Claude is now at a needs-input prompt it steers to the terminal instead of
+reopening compose; the buried draft persists and is reachable via normal buffer
+switching.

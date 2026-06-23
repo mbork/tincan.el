@@ -1036,13 +1036,27 @@ working, confirm first; otherwise open a compose buffer."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'tincan-compose-send)
     (define-key map (kbd "C-c C-k") #'tincan-compose-cancel)
+    (define-key map (kbd "C-c C-z") #'tincan-compose-hide)
     map)
-  "Keys for `tincan-compose-minor-mode' (D34/D37).")
+  "Keys for `tincan-compose-minor-mode' (D34/D37/D41).")
 
 (define-minor-mode tincan-compose-minor-mode
-  "Minor mode for a tincan compose buffer: \\`C-c C-c' sends, \\`C-c C-k' cancels."
+  "Minor mode for a tincan compose buffer.
+\\`C-c C-c' sends, \\`C-c C-k' cancels, \\`C-c C-z' hides (keeps the draft)."
   :lighter " Tincan-Compose"
   :keymap tincan-compose-mode-map)
+
+(defun tincan-compose-hide ()
+  "Bury this compose buffer, keeping the draft, and show its linked view (D41).
+Nothing is sent or discarded; bring the draft back with `tincan-reply'
+\(\\[tincan-reply]) in the view, which reopens this same compose buffer."
+  (interactive)
+  (let ((view tincan--view)
+        (window (selected-window)))
+    (bury-buffer)
+    (when (and (buffer-live-p view) (window-live-p window))
+      (set-window-buffer window view)
+      (select-window window))))
 
 (defun tincan--compose-buffer-for (terminal)
   "Return a live compose buffer targeting TERMINAL, or nil.
