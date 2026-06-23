@@ -502,3 +502,35 @@ so file content containing backticks widens the fence.
 Not handled: `Edit'/`MultiEdit' carry two payloads (old/new string), so they do
 not fit the single-content map and still render as JSON; a two-block renderer
 could be added later.
+
+### D40 - Session entry commands: start / resume / view / attach / dwim
+The reply path got a clear front door and single-purpose verb commands, replacing
+the earlier `tincan-start' that overloaded the prefix arg for new-vs-resume.
+- `tincan-start' always starts a NEW session in `default-directory' (prefix arg
+  ignored).
+- `tincan-resume' resumes an existing session; no prefix lists this project's
+  sessions, `C-u' lists all projects.  The resumed Claude always relaunches in
+  the session's own recorded `cwd' - `C-u' widens only the *list*, never the
+  launch directory.
+- `tincan-view' (read-only) is unchanged but shares the list format below.
+- `tincan-attach' (escape hatch) is unchanged.
+- `tincan' (alias of `tincan-dwim') is the front door: a 3-way DWIM, current
+  project only.  In order: (1) a live tincan terminal for this project exists ->
+  switch to it (its view if any); (2) else the project has a session on disk ->
+  resume the latest; (3) else start a new one.
+Scope: no prefix = current project (deepest-ancestor of `default-directory', D11);
+`C-u' = all projects (for `tincan-resume'/`tincan-view'; `tincan-start' and
+`tincan' ignore it - `tincan' is project-only by design, use `C-u tincan-resume'
+to cross projects).
+List format (one shared, scope-driven, title-first): `TITLE  DATE' for this
+project, `TITLE  DATE  DIR' under `C-u'.  Title leads because it is the
+identifier you scan for and front-anchors type-to-narrow; dir trails and only
+when broadened.  One function builds the list for `tincan-resume' and
+`tincan-view', so at a given scope they are identical (this was the original
+complaint).  Earlier dir-first ordering was rejected: dir is redundant on the
+left in the common single-project case and misaligns the rest.
+DWIM "live group" detection matches a live terminal whose launch `cwd'
+(stored buffer-locally in `tincan--cwd') is an ancestor-or-equal of
+`default-directory'.  This catches a just-started session whose transcript file
+does not exist yet (so it would be invisible to the on-disk listing), preventing
+a duplicate `--resume' of an already-running session.

@@ -307,6 +307,9 @@ Interactively, report the result in the echo area."
 (defvar-local tincan--terminal-p nil
   "Non-nil in a tincan terminal buffer (running Claude under vterm).")
 
+(defvar-local tincan--cwd nil
+  "Directory a terminal's Claude was launched in, for project matching (D40).")
+
 (defun tincan--short-id (session-id)
   "Return a short, buffer-name-friendly form of SESSION-ID."
   (substring session-id 0 (min 8 (length session-id))))
@@ -330,9 +333,10 @@ TITLE the short id is used."
 (defun tincan--list-sessions (&optional all)
   "Return an alist of (DISPLAY . PLIST) for sessions; PLIST has :id :title :cwd.
 Without ALL, list the sessions of the closest launch directory at or above
-`default-directory' (DISPLAY is \"TIMESTAMP  TITLE\").  With ALL, list every
-project's sessions and put the directory in DISPLAY (\"TITLE  DIR\") so it
-narrows by title or directory.  Runs tincan.py in `default-directory'."
+`default-directory'.  With ALL, list every project's sessions.  DISPLAY is
+title-first - \"TITLE  DATE\", or \"TITLE  DATE  DIR\" under ALL - so the two
+scopes share one format and any field narrows (D40).  Runs tincan.py in
+`default-directory'."
   (with-temp-buffer
     (let* ((args (append '("--show-sessions") (and all '("--all"))))
            (code (apply #'call-process "python3" nil t nil tincan-script args)))
@@ -350,8 +354,9 @@ narrows by title or directory.  Runs tincan.py in `default-directory'."
                     (title (nth 2 fields))
                     (cwd (nth 3 fields)))
                 (push (cons (if (and all cwd (not (string-empty-p cwd)))
-                                (format "%s  %s" title (abbreviate-file-name cwd))
-                              (format "%s  %s" timestamp title))
+                                (format "%s  %s  %s"
+                                        title timestamp (abbreviate-file-name cwd))
+                              (format "%s  %s" title timestamp))
                             (list :id id :title title :cwd cwd))
                       sessions))))
           (forward-line 1))
@@ -837,6 +842,7 @@ HINT, if non-nil, is shown in the header line until the first keystroke."
         (when proc (set-process-query-on-exit-flag proc nil)))
       (setq-local tincan--terminal-p t)
       (setq-local tincan--session-id session-id)
+      (setq-local tincan--cwd dir)
       (setq-local tincan--terminal-hint hint)
       (setq-local header-line-format '((:eval (tincan--terminal-header))))
       (tincan-terminal-mode 1)
@@ -867,23 +873,16 @@ Works from a view or a terminal buffer; either element may be nil."
   "Return the terminal buffer of the current buffer's session group, or nil."
   (cdr (tincan--resolve-target)))
 
-;; ** Starting and attaching
-;;;###autoload
-(defun tincan-start (&optional resume)
-  "Start Claude in a tincan terminal and attach a view (D31).
-With no prefix, start a NEW session: generate a session id, launch
-\"claude --session-id <id>\" in `default-directory', show the terminal, and
-open a view that follows it in the background.
-With a prefix argument RESUME, pick an existing session and launch
-\"claude --resume <id>\" in its directory, showing the view and leaving the
-terminal buried."
-  (interactive "P")
+;; ** Starting, resuming, attaching
+(defun tincan--require-vterm ()
+  "Signal a `user-error' unless vterm is available."
   (unless (tincan--vterm-available-p)
-    (user-error "tincan: vterm is required to run the terminal (see D26)"))
-  (if resume (tincan--start-resume) (tincan--start-new)))
+    (user-error "tincan: vterm is required to run the terminal (see D26)")))
 
 (defun tincan--start-new ()
-  "Start a new Claude session; see `tincan-start'."
+  "Start a NEW Claude session in `default-directory'; return the view (D40).
+Shows the terminal; the view follows it in the background."
+  (tincan--require-vterm)
   (let* ((id (tincan--new-session-id))
          (dir default-directory)
          (command (format "%s --session-id %s" tincan-claude-command id))
@@ -894,19 +893,74 @@ terminal buried."
     (pop-to-buffer terminal)
     view))
 
-(defun tincan--start-resume ()
-  "Resume an existing Claude session; see `tincan-start'."
-  (let* ((plist (tincan--read-session t))
-         (id (plist-get plist :id))
-         (title (plist-get plist :title))
-         (cwd (plist-get plist :cwd))
-         (dir (if (and cwd (not (string-empty-p cwd))) cwd default-directory))
+(defun tincan--resume-session (id title cwd)
+  "Resume session ID (TITLE), launching Claude in its own CWD; return the view.
+The launch directory is the session's recorded CWD, never the current one (D40).
+Shows the view and leaves the terminal buried."
+  (tincan--require-vterm)
+  (let* ((dir (if (and cwd (not (string-empty-p cwd))) cwd default-directory))
          (command (format "%s --resume %s" tincan-claude-command id))
          (terminal (tincan--make-terminal id command dir nil))
          (view (tincan--watch id (tincan--buffer-name id title))))
     (tincan--link view terminal id)
     (pop-to-buffer view)
     view))
+
+;;;###autoload
+(defun tincan-start ()
+  "Start a NEW Claude session in `default-directory' (D40).
+The prefix arg is ignored; to resume use `tincan-resume', and for the smart
+default use `tincan' (`tincan-dwim')."
+  (interactive)
+  (tincan--start-new))
+
+;;;###autoload
+(defun tincan-resume (&optional all)
+  "Resume an existing Claude session (D40).
+List this project's sessions; with a prefix argument ALL, list every project's.
+The resumed session always relaunches in its own recorded directory; ALL widens
+only the list, not the launch directory."
+  (interactive "P")
+  (let ((plist (tincan--read-session all)))
+    (tincan--resume-session (plist-get plist :id)
+                            (plist-get plist :title)
+                            (plist-get plist :cwd))))
+
+(defun tincan--ancestor-p (parent child)
+  "Non-nil if PARENT equals or is an ancestor of CHILD (component-aware)."
+  (string-prefix-p (file-name-as-directory (file-truename parent))
+                   (file-name-as-directory (file-truename child))))
+
+(defun tincan--project-terminal ()
+  "Return a live tincan terminal whose session belongs to the current project.
+A terminal belongs when its launch directory is an ancestor-or-equal of
+`default-directory' (D40)."
+  (seq-find (lambda (buffer)
+              (and (buffer-local-value 'tincan--terminal-p buffer)
+                   (process-live-p (get-buffer-process buffer))
+                   (let ((cwd (buffer-local-value 'tincan--cwd buffer)))
+                     (and cwd (tincan--ancestor-p cwd default-directory)))))
+            (buffer-list)))
+
+;;;###autoload
+(defun tincan-dwim ()
+  "Resume or start a Claude session for the current project, whichever fits (D40).
+In order: if a live session for this project is already open, switch to it; else
+resume the project's most recent session; else start a new one."
+  (interactive)
+  (let ((terminal (tincan--project-terminal)))
+    (if terminal
+        (pop-to-buffer (or (buffer-local-value 'tincan--view terminal) terminal))
+      (let ((sessions (tincan--list-sessions nil)))
+        (if sessions
+            (let ((plist (cdr (car sessions))))
+              (tincan--resume-session (plist-get plist :id)
+                                      (plist-get plist :title)
+                                      (plist-get plist :cwd)))
+          (tincan--start-new))))))
+
+;;;###autoload
+(defalias 'tincan #'tincan-dwim)
 
 ;;;###autoload
 (defun tincan-attach ()
