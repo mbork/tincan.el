@@ -1007,6 +1007,7 @@ rather than spawning a duplicate."
                         (generate-new-buffer
                          (tincan--compose-buffer-name view terminal))
                       (funcall (tincan--compose-major-mode))
+                      (visual-line-mode 1)
                       (setq-local tincan--view view)
                       (setq-local tincan--terminal terminal)
                       (setq-local header-line-format
