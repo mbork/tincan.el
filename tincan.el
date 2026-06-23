@@ -671,6 +671,9 @@ this if multi-line replies are not submitted; 0 sends the Return immediately."
     (define-key map (kbd "C-c o") #'tincan-switch-view)
     (define-key map (kbd "C-c k") #'tincan-close)
     (define-key map (kbd "C-c C-c") #'tincan-terminal-interrupt)
+    ;; Swallow C-z: vterm would forward it as SIGTSTP, suspending Claude with
+    ;; no job-control shell to resume it (D37).
+    (define-key map (kbd "C-z") #'ignore)
     map)
   "Keys for `tincan-terminal-mode' (layered over vterm; see D37).")
 

@@ -462,7 +462,9 @@ the sibling buffer), and `C-c k' (close the session).  The view adds `C-c 0'
 (dismiss the terminal window) and `q' (bury).  The terminal is a
 `tincan-terminal-mode' minor mode layered over vterm (its lighter doubles as an
 identity cue); it adds `C-c C-c' -> send a real interrupt to Claude, restored
-because binding `C-c ...' keys makes `C-c' an Emacs prefix in the buffer.  The
+because binding `C-c ...' keys makes `C-c' an Emacs prefix in the buffer.  It
+also binds `C-z' to `ignore', because vterm would otherwise forward it as
+SIGTSTP and suspend Claude with no job-control shell to resume it.  The
 compose buffer uses `C-c C-c' (send) and `C-c C-k' (cancel).
 Rationale: `C-c <letter>'/`C-c SPC' are the user keyspace, so they never clash
 with markdown-mode; `C-c C-c'/`C-c C-k' is the familiar org-capture/magit idiom.
