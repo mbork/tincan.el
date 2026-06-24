@@ -705,6 +705,30 @@ This only observes; to reply, start or attach a terminal (see `tincan-start',
   (pop-to-buffer
    (tincan--watch session-id (tincan--buffer-name session-id title))))
 
+(defun tincan--session-title (id)
+  "Return session ID's current title via tincan.py, or nil.
+Queries across all projects so a renamed (customTitle) name is picked up."
+  (let ((entry (seq-find (lambda (session)
+                           (equal (plist-get (cdr session) :id) id))
+                         (tincan--list-sessions t))))
+    (and entry (plist-get (cdr entry) :title))))
+
+;;;###autoload
+(defun tincan-rename-view ()
+  "Rename the session's view buffer to its current title (D27).
+Re-reads the title from the transcript, which reflects a Claude /rename, so a
+view that started as a short id (a new session had no title yet) picks up the
+new name.  Run from the view or the terminal."
+  (interactive)
+  (let ((view (car (tincan--resolve-target))))
+    (unless (buffer-live-p view)
+      (user-error "tincan: no view buffer for this session"))
+    (with-current-buffer view
+      (let ((name (tincan--buffer-name
+                   tincan--session-id (tincan--session-title tincan--session-id))))
+        (rename-buffer name t)
+        (message "tincan: renamed buffer to %s" name)))))
+
 ;; * Terminal (running Claude under vterm)
 ;; Claude runs in an Emacs vterm buffer (D24/D26); replies are pasted into it.
 ;; tincan owns the session id (D31): a new session is launched with
