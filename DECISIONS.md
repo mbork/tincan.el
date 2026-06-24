@@ -418,16 +418,25 @@ terminal).  Compose has its own send command, so the resolver handles two
 origins, not three (this finalizes D29's und. mechanism).
 
 ### D34 - Reply gate and compose buffer
-`tincan-reply' (run from the view or the terminal) gates on the view's state:
-`needs-input' -> do not compose; surface the terminal so you answer the prompt
-there (a pasted reply would be wrong during a permission prompt).  `working' ->
-confirm "send anyway?" (Claude queues mid-turn input, so this is a soft guard).
-`idle'/unknown -> open a compose buffer.  The compose buffer uses a Markdown
-major mode when available (markdown-ts-mode/gfm-mode/markdown-mode, else
-text-mode; the same runtime-dispatch reasoning as D16) plus a
-`tincan-compose-minor-mode' binding `C-c C-c' (send) and `C-c C-k' (cancel).
+`tincan-reply' (run from the view or the terminal) only steers: when the view's
+state is `needs-input' it surfaces the terminal so you answer the prompt there
+(a pasted reply would be wrong during a permission prompt); otherwise it just
+opens a compose buffer.  Composing is never blocked by Claude being busy - the
+"still working, send anyway?" confirmation was moved to send time
+(`tincan-compose-send'), so the check happens when it matters rather than
+gating drafting (Claude queues mid-turn input anyway, so it is a soft guard).
+The compose buffer uses a Markdown major mode when available
+(markdown-ts-mode/gfm-mode/markdown-mode, else text-mode; the same
+runtime-dispatch reasoning as D16) plus a `tincan-compose-minor-mode' binding
+`C-c C-c' (send), `C-c C-k' (cancel) and `C-c C-z' (hide; D41).
 Send pastes the text into the terminal with `vterm-send-string' (bracketed paste)
-then `vterm-send-return', and clears/buries the compose buffer.
+then `vterm-send-return', and kills the compose buffer.
+Draft safety: a buffer-local `kill-buffer-query-functions' guard confirms
+"Discard this draft?" before killing a compose buffer with a non-empty draft, so
+cancel, `C-x k' and session close all ask first; a successful send bypasses it
+(`tincan--compose-force-kill', since sending is not discarding).  `tincan-close'
+closes the compose buffer first, so closing a session runs that same discard
+confirmation and keeping the draft aborts the close.
 
 ### D35 - After sending, show the terminal without stealing focus
 On send the terminal is shown for a misfire check, but focus stays on the view

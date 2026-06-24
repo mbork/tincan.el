@@ -1002,26 +1002,24 @@ there is no session picking and no possible mislink."
 
 ;;;###autoload
 (defun tincan-reply ()
-  "Compose and send a reply to this session's Claude (D34).
-Run from the view or the terminal.  Gates on the agent state: when Claude is
-waiting for input, surface the terminal instead of composing; when it is still
-working, confirm first; otherwise open a compose buffer."
+  "Compose a reply to this session's Claude (D34).
+Run from the view or the terminal.  When Claude is waiting for input, surface
+the terminal instead of composing; otherwise open a compose buffer.  Composing
+is never blocked - the \"still working, send anyway?\" check happens at send time
+\(`tincan-compose-send')."
   (interactive)
   (let* ((target (tincan--resolve-target))
          (view (car target))
          (terminal (cdr target)))
     (unless (buffer-live-p terminal)
       (user-error "tincan: no terminal linked (use M-x tincan-attach)"))
-    (let ((state (and (buffer-live-p view)
-                      (buffer-local-value 'tincan--state view))))
-      (cond
-       ((eq state 'needs-input)
-        (tincan--display-terminal terminal 'select)
-        (message "Claude is waiting for input - answer in the terminal"))
-       ((and (eq state 'working)
-             (not (y-or-n-p "Claude is still working; send anyway? ")))
-        (message "tincan: reply cancelled"))
-       (t (tincan--open-compose view terminal))))))
+    (if (eq (and (buffer-live-p view)
+                 (buffer-local-value 'tincan--state view))
+            'needs-input)
+        (progn
+          (tincan--display-terminal terminal 'select)
+          (message "Claude is waiting for input - answer in the terminal"))
+      (tincan--open-compose view terminal))))
 
 ;; ** Compose buffer
 (defun tincan--compose-major-mode ()
@@ -1120,6 +1118,10 @@ rather than spawning a duplicate."
       (user-error "tincan: terminal is gone"))
     (unless (process-live-p (get-buffer-process terminal))
       (user-error "tincan: Claude process is not running"))
+    (when (and (buffer-live-p view)
+               (eq (buffer-local-value 'tincan--state view) 'working)
+               (not (y-or-n-p "Claude is still working; send anyway? ")))
+      (user-error "tincan: send cancelled"))
     (with-current-buffer terminal
       (vterm-send-string text t)
       ;; Send Return as a separate event: Claude ignores an Enter bundled with
