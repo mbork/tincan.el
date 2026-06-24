@@ -1193,11 +1193,19 @@ WHAT names the buffer for the error when it is missing."
       (message "tincan: terminal window is not shown"))))
 
 (defun tincan-close ()
-  "Close this tincan session: kill its terminal, view and follower (D24)."
+  "Close this tincan session: kill its compose, terminal, view and follower (D24).
+The compose buffer is closed first, so a non-empty draft prompts for
+confirmation; keeping the draft aborts the close."
   (interactive)
   (let* ((target (tincan--resolve-target))
          (view (car target))
-         (terminal (cdr target)))
+         (terminal (cdr target))
+         (compose (and (buffer-live-p terminal)
+                       (tincan--compose-buffer-for terminal))))
+    (when (buffer-live-p compose)
+      (kill-buffer compose)
+      (when (buffer-live-p compose)
+        (user-error "tincan: close cancelled (draft kept)")))
     (when (yes-or-no-p "Close this tincan session (ends Claude in the terminal)? ")
       (let ((tincan--closing t))
         (when (buffer-live-p terminal) (kill-buffer terminal))
