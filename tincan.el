@@ -1075,6 +1075,17 @@ Keyed on the terminal so concurrent sessions keep separate drafts."
                    (eq (buffer-local-value 'tincan--terminal buffer) terminal)))
             (buffer-list)))
 
+(defvar tincan--compose-force-kill nil
+  "When non-nil, skip the non-empty-draft confirmation when killing compose.")
+
+(defun tincan--compose-kill-query ()
+  "Confirm before killing a compose buffer that still holds a non-empty draft.
+Bypassed by `tincan--compose-force-kill' (a successful send is not a discard)."
+  (or tincan--compose-force-kill
+      (let ((draft (string-trim (buffer-string))))
+        (or (string-empty-p draft)
+            (yes-or-no-p "Discard this draft? ")))))
+
 (defun tincan--open-compose (view terminal)
   "Pop a compose buffer targeting the VIEW/TERMINAL session group.
 Reuse this session's existing compose buffer (keeping any in-progress draft)
@@ -1090,6 +1101,8 @@ rather than spawning a duplicate."
                       (setq-local header-line-format
                                   '((:eval (tincan--compose-header))))
                       (tincan-compose-minor-mode 1)
+                      (add-hook 'kill-buffer-query-functions
+                                #'tincan--compose-kill-query nil t)
                       (current-buffer)))))
     (pop-to-buffer buffer)
     buffer))
@@ -1114,11 +1127,13 @@ rather than spawning a duplicate."
       (when (> tincan-send-return-delay 0)
         (sleep-for tincan-send-return-delay))
       (vterm-send-return))
-    (kill-buffer compose)
+    ;; A send is not a discard, so skip the non-empty-draft confirmation.
+    (let ((tincan--compose-force-kill t))
+      (kill-buffer compose))
     (tincan--after-send view terminal)))
 
 (defun tincan-compose-cancel ()
-  "Discard the compose buffer without sending."
+  "Discard the compose buffer without sending (confirms a non-empty draft)."
   (interactive)
   (kill-buffer (current-buffer)))
 
