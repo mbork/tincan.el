@@ -319,15 +319,23 @@ Interactively, report the result in the echo area."
   :type 'integer
   :group 'tincan)
 
-(defun tincan--buffer-name (session-id title)
-  "Return the view buffer name for SESSION-ID, using TITLE when non-empty.
+(defun tincan--buffer-label (session-id title)
+  "Return a buffer label for SESSION-ID from TITLE, or the short id.
 TITLE is abbreviated to `tincan-buffer-title-width' columns; with no usable
-TITLE the short id is used."
-  (let* ((trimmed (and (stringp title) (string-trim title)))
-         (label (if (and trimmed (not (string-empty-p trimmed)))
-                    (truncate-string-to-width trimmed tincan-buffer-title-width)
-                  (tincan--short-id session-id))))
-    (format "*tincan view: %s*" label)))
+TITLE the short id is used.  Shared by the view and terminal buffer names so a
+session's two buffers carry the same label (D27)."
+  (let ((trimmed (and (stringp title) (string-trim title))))
+    (if (and trimmed (not (string-empty-p trimmed)))
+        (truncate-string-to-width trimmed tincan-buffer-title-width)
+      (tincan--short-id session-id))))
+
+(defun tincan--buffer-name (session-id title)
+  "Return the view buffer name for SESSION-ID, using TITLE when non-empty."
+  (format "*tincan view: %s*" (tincan--buffer-label session-id title)))
+
+(defun tincan--terminal-buffer-name (session-id title)
+  "Return the terminal buffer name for SESSION-ID, using TITLE when non-empty."
+  (format "*tincan terminal: %s*" (tincan--buffer-label session-id title)))
 
 ;; ** Session selection
 (defun tincan--list-sessions (&optional all)
@@ -714,20 +722,29 @@ Queries across all projects so a renamed (customTitle) name is picked up."
     (and entry (plist-get (cdr entry) :title))))
 
 ;;;###autoload
-(defun tincan-rename-view ()
-  "Rename the session's view buffer to its current title (D27).
-Re-reads the title from the transcript, which reflects a Claude /rename, so a
-view that started as a short id (a new session had no title yet) picks up the
+(defun tincan-rename ()
+  "Rename the session's view and terminal buffers to its current title (D27).
+Re-reads the title from the transcript, which reflects a Claude /rename, so
+buffers that started as a short id (a new session had no title yet) pick up the
 new name.  Run from the view or the terminal."
   (interactive)
-  (let ((view (car (tincan--resolve-target))))
-    (unless (buffer-live-p view)
-      (user-error "tincan: no view buffer for this session"))
-    (with-current-buffer view
-      (let ((name (tincan--buffer-name
-                   tincan--session-id (tincan--session-title tincan--session-id))))
-        (rename-buffer name t)
-        (message "tincan: renamed buffer to %s" name)))))
+  (let* ((group (tincan--resolve-target))
+         (view (car group))
+         (terminal (cdr group)))
+    (unless (or (buffer-live-p view) (buffer-live-p terminal))
+      (user-error "tincan: no session buffers to rename"))
+    (let* ((id (or (and (buffer-live-p view)
+                        (buffer-local-value 'tincan--session-id view))
+                   (and (buffer-live-p terminal)
+                        (buffer-local-value 'tincan--session-id terminal))))
+           (title (tincan--session-title id)))
+      (when (buffer-live-p view)
+        (with-current-buffer view
+          (rename-buffer (tincan--buffer-name id title) t)))
+      (when (buffer-live-p terminal)
+        (with-current-buffer terminal
+          (rename-buffer (tincan--terminal-buffer-name id title) t)))
+      (message "tincan: renamed to %s" (tincan--buffer-label id title)))))
 
 ;; * Terminal (running Claude under vterm)
 ;; Claude runs in an Emacs vterm buffer (D24/D26); replies are pasted into it.
@@ -859,11 +876,13 @@ Skipped during an intentional `tincan-close' teardown."
   (or tincan--closing
       (yes-or-no-p "Kill this terminal and end its Claude session? ")))
 
-(defun tincan--make-terminal (session-id command dir hint)
+(defun tincan--make-terminal (session-id command dir title hint)
   "Create a tincan terminal for SESSION-ID running COMMAND in DIR; return it.
-HINT, if non-nil, is shown in the header line until the first keystroke."
-  (let* ((name (format "*tincan terminal: %s*"
-                       (abbreviate-file-name (directory-file-name dir))))
+The buffer is named from TITLE (the short id when TITLE is empty), matching the
+view buffer's label so the pair reads together; `tincan-rename' refreshes both
+after a /rename.  HINT, if non-nil, is shown in the header line until the first
+keystroke."
+  (let* ((name (tincan--terminal-buffer-name session-id title))
          (vterm-shell command)
          (default-directory (file-name-as-directory dir))
          (buffer (generate-new-buffer name)))
@@ -922,7 +941,7 @@ Shows the terminal; the view follows it in the background."
   (let* ((id (tincan--new-session-id))
          (dir default-directory)
          (command (format "%s --session-id %s" tincan-claude-command id))
-         (terminal (tincan--make-terminal id command dir
+         (terminal (tincan--make-terminal id command dir nil
                                           (tincan--terminal-hint-string)))
          (view (tincan--watch id (tincan--buffer-name id nil))))
     (tincan--link view terminal id)
@@ -936,7 +955,7 @@ Shows the view and leaves the terminal buried."
   (tincan--require-vterm)
   (let* ((dir (if (and cwd (not (string-empty-p cwd))) cwd default-directory))
          (command (format "%s --resume %s" tincan-claude-command id))
-         (terminal (tincan--make-terminal id command dir nil))
+         (terminal (tincan--make-terminal id command dir title nil))
          (view (tincan--watch id (tincan--buffer-name id title))))
     (tincan--link view terminal id)
     (pop-to-buffer view)

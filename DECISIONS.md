@@ -297,13 +297,20 @@ floor, and the folding is simpler for leaning on the built-in cycle keys.
 (auto-generated), then the first user prompt, then the session id.  Each kind is
 optional and every combination occurs in practice (some sessions have neither
 title; one can have a custom title but no AI title), so it is a graceful
-fallback chain.  The Emacs viewer names its buffer `*tincan: <title>*' with the
-title abbreviated to `tincan-buffer-title-width' columns (default 16; short id
-when there is no title).
+fallback chain.  Both of a session's buffers carry the same label
+(`tincan--buffer-label'): the view is `*tincan view: <title>*' and the terminal
+`*tincan terminal: <title>*', with the title abbreviated to
+`tincan-buffer-title-width' columns (default 16; short id when there is no
+title).  The terminal used to be named after its launch directory's full path,
+which was long and not per-session (several sessions can share a project dir);
+the title is short and pairs the two buffers so they sort together and one
+string narrows to both in `C-x b'.
 Because the title can change mid-session (a later `/rename'), buffer reuse is
 keyed on the session id held buffer-locally, not on the buffer name - so
 re-watching a renamed session reuses its buffer instead of spawning a duplicate
-(`generate-new-buffer' names only genuinely new ones).
+(`generate-new-buffer' names only genuinely new ones).  A new session's buffers
+start as the short id (no title yet); `tincan-rename' re-reads the transcript
+title and renames the view and the terminal together to catch up a `/rename'.
 
 ### D28 - `M-x tincan' session picking: deepest-ancestor, `C-u' for all
 `M-x tincan' lists this project's sessions (D11's deepest-ancestor match), so it
