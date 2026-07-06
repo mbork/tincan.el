@@ -1,17 +1,17 @@
 #+TITLE: tincan.el - a hackish take on agentic coding in Emacs
 #+AUTHOR: Marcin 'mbork' Borkowski
 
-This is a small tool to drive Claude Code from Emacs via tmux.  It consists of a few parts:
+This is a small tool to drive Claude Code from Emacs.  It consists of a few parts:
 1. A Python script which takes an ongoing conversation with Claude Code and appends it to a plain text file (watchable with =tail -f= or =auto-revert-tail-mode=).
 2. A very simple Emacs mode to show that conversation with font-locking.
 3. A slightly more complex Emacs mode to gather the user's responses and send them back to Claude Code.
 4. A set of Claude Code hooks to tell Emacs whether it's working or idle.
-5. An Emacs command orchestrating all previous parts.
+5. Emacs commands orchestrating all previous parts.
 
-So far everything except the input mode (part 3) is implemented: the transcript
-script, the font-locked viewer, the working/idle and needs-input signals, and
-the read-only =M-x tincan= command that ties them together.  Sending replies
-back to Claude Code (part 3) is not written yet.
+All five parts are implemented: the transcript script, the font-locked viewer,
+the working/idle and needs-input signals, the input mode (compose replies and
+send them), and the commands that tie them together.  Claude runs in an Emacs
+=vterm= terminal (no tmux) with a linked, read-only rendered view alongside it.
 
 * Why both the view and the terminal
 
@@ -44,40 +44,57 @@ back to Claude Code (part 3) is not written yet.
 # (Terse draft notes; expand into prose.)
 
 Commands:
-- =M-x tincan-start= - run Claude in a vterm, attach a view
-  - new session: generates an id, runs =claude --session-id <id>=, shows terminal
-  - =C-u M-x tincan-start= - resume (=claude --resume <id>=), shows view, terminal buried
-- =M-x tincan-view= - observe a session, read-only
-- =M-x tincan-attach= - from a terminal buffer: (re)build and link its view
-- =tincan-reply= - compose and send a reply
+- =M-x tincan= (=tincan-dwim=) - front door, current project: switch to a live
+  session if one is open, else resume the most recent, else start a new one
+- =M-x tincan-start= - always a NEW session in =default-directory=: generates an
+  id, runs =claude --session-id <id>=, shows the terminal, view follows behind
+- =M-x tincan-resume= - resume an existing session, picked from a list; relaunches
+  =claude --resume <id>= in the session's own recorded directory; shows the view,
+  terminal buried.  =C-u= widens the list to every project
+- =M-x tincan-view= - observe a session read-only (no terminal, no replies); =C-u=
+  for all projects
+- =M-x tincan-attach= - from a terminal buffer, (re)build and link its view
+- =M-x tincan-rename= - rename the view and terminal buffers to the session's
+  current title (picks up a =/rename=)
 
-Keys (view and terminal):
-- =C-c SPC= - reply (opens a compose buffer)
-- =C-c o= - go to the sibling buffer (view <-> terminal)
+Keys - view:
+- =C-c SPC= / =r= - reply (compose buffer; jumps to the terminal when Claude waits)
+- =C-c o= / =t= - go to the terminal
 - =C-c k= - close the session (ends Claude in the terminal)
-- =C-c 0= (view) - delete the terminal window
-- =q= (view) - bury the view
-- =C-c C-c= (terminal) - send a real interrupt (C-c) to Claude
+- =C-c 0= - delete the terminal window
+- =q= - bury the view
+- =n= / =p= - line down / up; =SPC= / =DEL= - page down / up; =<= / =>= - buffer ends
+- =M-n= / =M-p= - next / previous heading; =M-}= / =M-{= - next / previous turn
+- =w= - copy the section (or code block) at point
+- =RET= - visit the file at point; =?= - describe the mode
+
+Keys - terminal:
+- =C-c SPC= - reply; =C-c o= - go to the view; =C-c k= - close the session
+- =C-c C-c= - send a real interrupt (C-c) to Claude
+- =C-z= - disabled (would suspend the TUI)
 
 Compose buffer:
-- =C-c C-c= - send to the terminal (bracketed paste + Return)
-- =C-c C-k= - cancel
+- =C-c C-c= - send to the terminal (bracketed paste + Return); confirms first if
+  Claude is still working
+- =C-c C-k= - cancel (confirms before discarding a non-empty draft)
+- =C-c C-z= - hide the compose buffer, keeping the draft; reply again to restore it
 
 Options:
 - =tincan-claude-command= - the program (default =claude=)
 - =tincan-show-terminal-on-send= - =display= / =select= / =none= (default =display=)
-- =tincan-dismiss-terminal-on-next-command= - next view command deletes the
-  terminal window (default =t=)
+- =tincan-dismiss-terminal-on-next-command= - the next view command dismisses the
+  peeked terminal window (default =t=)
+- =tincan-send-return-delay= - seconds between paste and Return (default =0.1=;
+  raise if replies do not submit)
+- =tincan-terminal-scroll-margin= - bottom margin so prompts stay on-screen (default =8=)
+- =tincan-buffer-title-width= - title width in buffer names (default =16=)
 
 Requirements and notes:
 - vterm needed for the terminal (without it: read-only =tincan-view= only)
 - =markdown-ts-mode= (Emacs 31) or =gfm-mode= improves rendering
-- flow: view -> reply -> compose -> =C-c C-c= -> terminal -> =C-c o= back
-
-Fix in the existing English text:
-- drop "via tmux" (no longer tmux)
-- input mode (part 3) is now implemented
-- rename =M-x tincan= to =M-x tincan-view=
+- buffers named by title: =*tincan view: <title>*= / =*tincan terminal: <title>*=
+  (short id until Claude sets one; =tincan-rename= refreshes both)
+- flow: view -> =C-c SPC= reply -> compose -> =C-c C-c= -> terminal -> =C-c o= back
 
 * Usage
 
@@ -133,29 +150,31 @@ Load the mode:
 (require 'tincan)
 #+end_src
 
-Then watch a session live with one command:
+Then observe a session live, read-only, with one command:
 
 #+begin_src
-M-x tincan
+M-x tincan-view
 #+end_src
 
 Run it from the project (any subdirectory works).  It lists that project's
 sessions, lets you pick one, launches =tincan.py --follow=, and shows the
 rendered transcript in a read-only buffer that updates as Claude works.  With a
-prefix argument (=C-u M-x tincan=) it offers every project's session instead -
-narrow by title or directory - for when you are outside the project tree.
+prefix argument (=C-u M-x tincan-view=) it offers every project's session instead
+- narrow by title or directory - for when you are outside the project tree.  To
+drive Claude rather than only watch, use =M-x tincan= (the front door) - see
+[[*Input mode - usage][Input mode - usage]] above.
 
 Narrowing by directory in that picker depends on your completion setup: Ivy,
 Helm and Vertico (with =orderless=) match anywhere out of the box, while vanilla
 =completing-read= wants =flex= or =substring= in =completion-styles= to match a
 directory in the middle of a candidate.
 
-The mode line shows the agent's state: =[working]=, =[idle]= (after a =@@@ DONE=
+The header line shows the agent's state: =[working]=, =[idle]= (after a =@@@ DONE=
 turn-end marker, derived from Claude Code's =turn_duration= record), and - if the
 optional hook below is installed - =[needs input]= when Claude is waiting for you
 in the terminal.
 
-=M-x tincan= renders through =tincan-render-buffer=, which uses =markdown-mode=
+=M-x tincan-view= renders through =tincan-render-buffer=, which uses =markdown-mode=
 (or =gfm-mode=) when available - including native, per-language fontification of
 fenced code blocks - and otherwise falls back to the plain =tincan-view-mode=.
 Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
@@ -192,9 +211,9 @@ When Claude pauses for a tool-permission prompt (or sits idle waiting for a
 prompt), nothing is written to the transcript - that prompt is terminal-only
 UI - so the viewer cannot show it on its own.  To surface it, tincan can install
 an optional Claude Code =Notification= hook that writes a small per-session file
-at =<config-dir>/tincan/<session-id>.notify=; =M-x tincan= watches that file and
-shows =[needs input]= in the mode line.  The hook only signals that Claude wants
-you - you still answer the prompt in the terminal.
+at =<config-dir>/tincan/<session-id>.notify=; the view watches that file and
+shows =[needs input]= in the header line.  The hook only signals that Claude
+wants you - you still answer the prompt in the terminal.
 
 Install (and uninstall) it from Emacs:
 
