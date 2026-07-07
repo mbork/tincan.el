@@ -338,7 +338,10 @@ def read_session_meta(path):
                 continue
             if cwd is None and record.get("cwd"):
                 cwd = record["cwd"]
-            if timestamp is None and record.get("timestamp"):
+            # Keep the latest timestamp seen (records are appended in order), so
+            # this is the time of most recent activity, not session creation. It
+            # is both the picker's date column and its sort key.
+            if record.get("timestamp"):
                 timestamp = record["timestamp"]
             # A /rename writes a "custom-title" record; keep the latest of each
             # title kind and prefer the user's custom title below.

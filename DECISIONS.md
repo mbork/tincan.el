@@ -78,10 +78,13 @@ working directory: among sessions whose `cwd' is an ancestor-or-equal of the cwd
 (component-aware via `os.path.commonpath', so `M-x tincan' works from any
 subproject directory), the ones with the deepest such `cwd'.  `--all' instead
 lists every project's sessions.  Output is tab-separated
-`id<TAB>timestamp<TAB>title<TAB>cwd', one per line, newest first.
+`id<TAB>timestamp<TAB>title<TAB>cwd', one per line, most recently active first.
 The title is `customTitle' (a `/rename'), else `aiTitle', else the first user
-prompt (collapsed/truncated), else the id (see D27).  Timestamps are the first
-record's, in local time as ISO-8601 with offset.
+prompt (collapsed/truncated), else the id (see D27).  The timestamp is the
+session's most recent activity - the last record's timestamp, not the first
+(creation) one - in local time as ISO-8601 with offset; it is both the shown
+date and the sort key, so the newest-active session sorts to the top (which is
+what `tincan-dwim' resumes).
 Rationale: exact-cwd matching broke when run below the project root; ancestor
 matching is symlink-safe for free because both `os.getcwd()' and the recorded
 `cwd' are physical paths.  The `cwd' column lets the Emacs all-projects picker

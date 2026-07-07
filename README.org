@@ -105,17 +105,18 @@ for the viewer.  For the nicest rendering, install [[https://github.com/jrblevin
 
 =tincan.py= reads Claude Code's own transcript files under
 =~/.claude/projects/=.  Run it from your project (or any subdirectory) to list
-that project's sessions, most recent first; add =--all= for every project:
+that project's sessions, most recently active first; add =--all= for every project:
 
 #+begin_src sh
 ./tincan.py --show-sessions          # sessions of the enclosing project
 ./tincan.py --show-sessions --all    # every project's sessions
 #+end_src
 
-Each line is =SESSION-ID<TAB>TIMESTAMP<TAB>TITLE<TAB>CWD=.  Without =--all= it
-lists the sessions of the closest launch directory at or above the working
-directory.  A session can be named by its id, a unique id prefix, or a path to a
-=.jsonl= transcript.
+Each line is =SESSION-ID<TAB>TIMESTAMP<TAB>TITLE<TAB>CWD=, where =TIMESTAMP= is
+the time of the session's most recent activity (not its creation) and is also
+the sort key.  Without =--all= it lists the sessions of the closest launch
+directory at or above the working directory.  A session can be named by its id,
+a unique id prefix, or a path to a =.jsonl= transcript.
 
 ** Following a transcript with =tail -f=
 
