@@ -379,6 +379,18 @@ scopes share one format and any field narrows (D40).  Runs tincan.py in
           (forward-line 1))
         (nreverse sessions)))))
 
+(defun tincan--session-collection (sessions)
+  "Return a completion table over SESSIONS that keeps their order.
+SESSIONS is the alist from `tincan--list-sessions', already newest-active
+first.  Completion UIs (Vertico, Icomplete, ...) re-sort candidates by default;
+the `display-sort-function'/`cycle-sort-function' metadata pins the shown order
+to the list order so tincan.py's ordering survives (D40)."
+  (lambda (string predicate action)
+    (if (eq action 'metadata)
+        '(metadata (display-sort-function . identity)
+                   (cycle-sort-function . identity))
+      (complete-with-action action sessions string predicate))))
+
 (defun tincan--read-session (&optional all)
   "Prompt for a session; return its PLIST (:id :title :cwd).
 With ALL, choose among every project's sessions instead of this project's."
@@ -388,7 +400,9 @@ With ALL, choose among every project's sessions instead of this project's."
           (user-error "tincan: no sessions found")
         (user-error "tincan: no sessions under %s (use C-u for all projects)"
                     default-directory)))
-    (cdr (assoc (completing-read "tincan session: " sessions nil t) sessions))))
+    (let ((choice (completing-read "tincan session: "
+                                   (tincan--session-collection sessions) nil t)))
+      (cdr (assoc choice sessions)))))
 
 ;; ** State and mode line
 ;; The agent's state is derived from the transcript stream: a `@@@ DONE' line

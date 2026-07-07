@@ -553,6 +553,13 @@ DWIM "live group" detection matches a live terminal whose launch `cwd'
 `default-directory'.  This catches a just-started session whose transcript file
 does not exist yet (so it would be invisible to the on-disk listing), preventing
 a duplicate `--resume' of an already-running session.
+Ordering: tincan.py already sorts most-recently-active first (D8), but completion
+UIs re-sort by default (Vertico by history/length/alpha), which discarded that
+order.  `tincan--read-session' therefore wraps the alist in a completion table
+(`tincan--session-collection') whose `metadata' declares
+`display-sort-function'/`cycle-sort-function' = `identity', pinning the shown
+order to the list order.  This also keeps `tincan-dwim' step 2 ("resume the
+latest") consistent with what the picker shows on top.
 
 ### D41 - Hide the compose buffer without losing the draft
 `tincan-compose-hide' (\`C-c C-z' in the compose buffer) buries the compose
