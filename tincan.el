@@ -79,7 +79,10 @@
 
 ;; * Font lock
 ;; The markers below must stay in sync with tincan.py's ROLE_* constants.
-(defvar tincan-font-lock-keywords
+;; A `defconst' (not `defvar') so reloading the file - e.g. after
+;; `package-vc-upgrade' - actually refreshes the keywords; `defvar' would keep
+;; the already-bound value and silently ignore new rules until a full restart.
+(defconst tincan-font-lock-keywords
   '(("^@@@ USER.*$" 0 'tincan-user t)
     ("^@@@ ASSISTANT.*$" 0 'tincan-assistant t)
     ("^@@@ THINKING.*$" 0 'tincan-thinking t)
