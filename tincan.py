@@ -106,7 +106,20 @@ def fence_body(body, lang):
     fence = "`" * max(3, longest_backtick_run(body) + 1)
     return fence + lang + "\n" + body + "\n" + fence
 
-def format_block(header, body, lang=None):
+def format_marker_time(timestamp):
+    # A readable, space-separated form of a record's ISO-8601 TIMESTAMP,
+    # "YYYY-MM-DD HH:MM:SS" in local time, appended to "@@@" marker lines so the
+    # transcript (and the Emacs view) show when each block was recorded.  Empty
+    # when the timestamp is missing or unparseable.
+    if not timestamp:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+def format_block(header, body, lang=None, timestamp=None):
     body = body.strip("\n")
     if not body.strip():
         # Skip empty blocks (e.g. thinking whose text was not persisted).
@@ -115,6 +128,9 @@ def format_block(header, body, lang=None):
     # string makes a plain, language-less code block).
     if lang is not None:
         body = fence_body(body, lang)
+    stamp = format_marker_time(timestamp)
+    if stamp:
+        header = header + " " + stamp
     return header + "\n" + body + "\n\n"
 
 def get_content(record):
@@ -154,7 +170,7 @@ CONTENT_TOOLS = {
     "Write": ("file_path", "content"),
 }
 
-def render_tool_use(block):
+def render_tool_use(block, timestamp):
     name = block.get("name", "?")
     tool_input = block.get("input")
     spec = CONTENT_TOOLS.get(name)
@@ -167,13 +183,13 @@ def render_tool_use(block):
         header = ROLE_TOOL_USE + " " + name
         if path:
             header += " " + path
-        return format_block(header, content, lang=lang_for_path(path))
+        return format_block(header, content, lang=lang_for_path(path), timestamp=timestamp)
     # Default: pretty-print the input as JSON.
     if tool_input is None:
         body = ""
     else:
         body = json.dumps(tool_input, indent=2, ensure_ascii=False)
-    return format_block(ROLE_TOOL_USE + " " + name, body, lang="json")
+    return format_block(ROLE_TOOL_USE + " " + name, body, lang="json", timestamp=timestamp)
 
 def maybe_prettify_json(text):
     # If TEXT is a JSON object or array, return (pretty-printed, "json"); else
@@ -190,7 +206,7 @@ def maybe_prettify_json(text):
         return json.dumps(parsed, indent=2, ensure_ascii=False), "json"
     return text, ""
 
-def render_tool_result(block):
+def render_tool_result(block, timestamp):
     # A tool_result's content is either a plain string or a list of text blocks.
     content = block.get("content")
     if isinstance(content, str):
@@ -207,52 +223,54 @@ def render_tool_result(block):
         header = ROLE_TOOL_RESULT + " (error)"
     # Pretty-print JSON results (fenced as json); leave plain text verbatim.
     body, lang = maybe_prettify_json(body)
-    return format_block(header, body, lang=lang)
+    return format_block(header, body, lang=lang, timestamp=timestamp)
 
 # ** User and assistant records
-def render_user_block(block):
+def render_user_block(block, timestamp):
     block_type = block.get("type") if isinstance(block, dict) else None
     if block_type == "text":
-        return format_block(ROLE_USER, block.get("text", ""))
+        return format_block(ROLE_USER, block.get("text", ""), timestamp=timestamp)
     if block_type == "tool_result":
         # Tool results are delivered to the model as a "user" message (API shape).
-        return render_tool_result(block)
+        return render_tool_result(block, timestamp)
     return None
 
 def render_user(record):
+    timestamp = record.get("timestamp")
     content = get_content(record)
     parts = []
     if isinstance(content, str):
-        rendered = format_block(ROLE_USER, content)
+        rendered = format_block(ROLE_USER, content, timestamp=timestamp)
         if rendered:
             parts.append(rendered)
     elif isinstance(content, list):
         for block in content:
-            rendered = render_user_block(block)
+            rendered = render_user_block(block, timestamp)
             if rendered:
                 parts.append(rendered)
     return "".join(parts) if parts else None
 
-def render_assistant_block(block):
+def render_assistant_block(block, timestamp):
     block_type = block.get("type") if isinstance(block, dict) else None
     if block_type == "text":
-        return format_block(ROLE_ASSISTANT, block.get("text", ""))
+        return format_block(ROLE_ASSISTANT, block.get("text", ""), timestamp=timestamp)
     if block_type == "thinking":
-        return format_block(ROLE_THINKING, block.get("thinking", ""))
+        return format_block(ROLE_THINKING, block.get("thinking", ""), timestamp=timestamp)
     if block_type == "tool_use":
-        return render_tool_use(block)
+        return render_tool_use(block, timestamp)
     return None
 
 def render_assistant(record):
+    timestamp = record.get("timestamp")
     content = get_content(record)
     parts = []
     if isinstance(content, str):
-        rendered = format_block(ROLE_ASSISTANT, content)
+        rendered = format_block(ROLE_ASSISTANT, content, timestamp=timestamp)
         if rendered:
             parts.append(rendered)
     elif isinstance(content, list):
         for block in content:
-            rendered = render_assistant_block(block)
+            rendered = render_assistant_block(block, timestamp)
             if rendered:
                 parts.append(rendered)
     return "".join(parts) if parts else None
@@ -264,7 +282,11 @@ def render_system(record):
     # it to tell that the agent has finished.
     if record.get("subtype") == "turn_duration":
         seconds = round(record.get("durationMs", 0) / 1000)
-        return "{} ({}s)\n\n".format(ROLE_DONE, seconds)
+        header = "{} ({}s)".format(ROLE_DONE, seconds)
+        stamp = format_marker_time(record.get("timestamp"))
+        if stamp:
+            header += " " + stamp
+        return header + "\n\n"
     return None
 
 # ** Record dispatch

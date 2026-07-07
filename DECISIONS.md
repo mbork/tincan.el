@@ -585,3 +585,19 @@ window), so short windows degrade gracefully; 0 disables it.
 Chosen over a custom `window-scroll-functions'/recenter hook: `scroll-margin' is
 native and does not fight vterm's redraw.  The hook remains a fallback if the
 margin proves insufficient.
+
+### D43 - Timestamp on every `@@@` marker, dimmed in the view
+Each `@@@ ROLE' marker line ends with the record's time as `YYYY-MM-DD HH:MM:SS'
+(a space, not `T', for readability), in local time via
+`format_marker_time'/`format_block'.  It is when that block was recorded - a
+USER prompt was sent, a TOOL_RESULT returned, a turn finished (DONE, after the
+`(Ns)' parens) - so a resumed session's history shows when things happened.  The
+blocks of one record share that record's timestamp (e.g. an assistant text plus
+its tool_use), which is truthful: that is when the record was written.
+tincan.py emits it (so `tail -f' users get it too, and only the script has each
+record's timestamp; the Emacs view renders from that text).  The view dims it
+with a `tincan-timestamp' face (inherits `shadow') via a font-lock keyword
+placed last so it overrides the role face on the trailing span; the keyword
+matches only a real `YYYY-MM-DD HH:MM:SS' at end of an `@@@' line, so markers
+without a timestamp are untouched.  State detection is unaffected: it keys on the
+`@@@ DONE' prefix, which still leads the line.

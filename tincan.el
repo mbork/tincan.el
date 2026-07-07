@@ -72,6 +72,11 @@
   "Face for the \"@@@ DONE\" marker line that ends a turn."
   :group 'tincan)
 
+(defface tincan-timestamp
+  '((t :inherit shadow))
+  "Face dimming the timestamp tincan.py appends to a \"@@@ ROLE\" marker line."
+  :group 'tincan)
+
 ;; * Font lock
 ;; The markers below must stay in sync with tincan.py's ROLE_* constants.
 (defvar tincan-font-lock-keywords
@@ -80,7 +85,11 @@
     ("^@@@ THINKING.*$" 0 'tincan-thinking t)
     ("^@@@ TOOL_USE.*$" 0 'tincan-tool-use t)
     ("^@@@ TOOL_RESULT.*$" 0 'tincan-tool-result t)
-    ("^@@@ DONE.*$" 0 'tincan-done t))
+    ("^@@@ DONE.*$" 0 'tincan-done t)
+    ;; Dim the "YYYY-MM-DD HH:MM:SS" tincan.py appends at a marker line's end;
+    ;; last so it overrides the role face on that trailing span (D43).
+    ("^@@@ .*\\( [0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [0-9]\\{2\\}:[0-9]\\{2\\}:[0-9]\\{2\\}\\)$"
+     1 'tincan-timestamp t))
   "Font-lock keywords highlighting the \"@@@ ROLE\" section markers.
 Used directly by `tincan-view-mode' and added on top of Markdown
 fontification by `tincan-render-buffer'.  The trailing OVERRIDE flag makes the
