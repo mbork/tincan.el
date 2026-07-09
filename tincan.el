@@ -241,6 +241,8 @@ cases the \"@@@ ROLE\" markers are font-locked and the buffer is read-only."
       (tincan-view-mode)))
   ;; Soft-wrap long prose and tool output at word boundaries.
   (visual-line-mode 1)
+  ;; Treat a single space after .?! as a sentence end (M-a/M-e navigation).
+  (setq-local sentence-end-double-space nil)
   (tincan--setup-folding))
 
 ;; * Notification hook
@@ -922,6 +924,8 @@ keystroke."
       (setq-local tincan--terminal-p t)
       (setq-local tincan--session-id session-id)
       (setq-local tincan--cwd dir)
+      ;; Treat a single space after .?! as a sentence end (M-a/M-e navigation).
+      (setq-local sentence-end-double-space nil)
       ;; Keep options/prompts that print below the cursor on-screen (D42).
       (setq-local scroll-margin tincan-terminal-scroll-margin)
       (setq-local tincan--terminal-hint hint)
@@ -1163,6 +1167,8 @@ rather than spawning a duplicate."
                          (tincan--compose-buffer-name view terminal))
                       (funcall (tincan--compose-major-mode))
                       (visual-line-mode 1)
+                      ;; A single space after .?! ends a sentence (M-a/M-e).
+                      (setq-local sentence-end-double-space nil)
                       (setq-local tincan--view view)
                       (setq-local tincan--terminal terminal)
                       (setq-local header-line-format
