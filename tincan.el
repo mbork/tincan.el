@@ -543,8 +543,11 @@ just will not appear if the optional hook is absent or watching is unsupported."
     (define-key map (kbd "C-c 0") #'tincan-delete-terminal-window)
     (define-key map (kbd "q") #'quit-window)
     ;; Read-only buffer, so single keys are free for viewer-style navigation.
-    ;; TAB/S-TAB folding is handled by outline-minor-mode-cycle's heading overlay
-    ;; keymap, so it is not set here.
+    ;; On a heading, TAB/S-TAB cycle via outline-minor-mode-cycle's heading-local
+    ;; keymap (which outranks this map); TAB here adds the body case, folding the
+    ;; enclosing section from anywhere (and shadowing markdown-cycle off-heading).
+    (define-key map (kbd "TAB") #'tincan-cycle)
+    (define-key map (kbd "<tab>") #'tincan-cycle)
     (define-key map (kbd "SPC") #'scroll-up-command)
     (define-key map (kbd "DEL") #'scroll-down-command)
     (define-key map (kbd "S-SPC") #'scroll-down-command)
@@ -563,6 +566,7 @@ just will not appear if the optional hook is absent or watching is unsupported."
     (define-key map (kbd "[") #'tincan-previous-turn)
     (define-key map (kbd "]") #'tincan-next-turn)
     ;; Reader-style actions.
+    (define-key map (kbd "/") #'isearch-forward)
     (define-key map (kbd "r") #'tincan-reply)
     (define-key map (kbd "t") #'tincan-switch-terminal)
     (define-key map (kbd "w") #'tincan-copy-section)
@@ -628,6 +632,17 @@ On a top-level @@@ marker there is nothing above, so it is a quiet no-op."
   (condition-case nil
       (outline-up-heading 1)
     (error (message "tincan: already at the top-level section"))))
+
+(defun tincan-cycle ()
+  "Cycle the folding of the section at point, working from inside its body too.
+On a heading line `outline-minor-mode-cycle' handles TAB via a heading-local
+keymap that outranks this one; this command covers the body case by moving to
+the enclosing heading and cycling it, so TAB folds a section from anywhere."
+  (interactive)
+  (condition-case nil
+      (progn (outline-back-to-heading)
+             (outline-cycle))
+    (error (message "tincan: no section to fold here"))))
 
 (defun tincan--code-block-at-point ()
   "If point is inside a fenced code block, return (BEG . END) of its content.

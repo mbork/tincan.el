@@ -69,7 +69,9 @@ Keys - view:
   heading (@@@ marker or Markdown heading; =u= climbs to the enclosing @@@);
   =M-n= / =M-p= - only @@@ section markers; =[= / =]= - previous / next
   USER / ASSISTANT turn
-- =w= - copy the section (or code block) at point
+- =TAB= - fold the section at point (from its heading or its body); =S-TAB= -
+  whole buffer
+- =/= - search (=isearch-forward=); =w= - copy the section (or code block) at point
 - =RET= - visit the file at point; =?= - describe the mode
 
 Keys - terminal:
@@ -186,8 +188,9 @@ Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
 =TOOL_USE=, =TOOL_RESULT=, and =DONE=) are font-locked and the buffer is
 read-only.
 
-The sections are foldable: =TAB= on a section's =@@@= heading cycles its
-visibility, and =S-TAB= cycles the whole buffer.  Every section except =USER= and
+The sections are foldable: =TAB= cycles a section's visibility - on its =@@@=
+heading or from anywhere inside its body - and =S-TAB= cycles the whole buffer.
+Every section except =USER= and
 =ASSISTANT= starts folded - so thinking, tool calls, tool results and =DONE=
 markers stay out of the way until you open them, including as they stream in.
 Customize which roles stay open with =tincan-unfolded-sections=.

@@ -272,9 +272,8 @@ heading, which is harmless (it just becomes foldable).
 `outline-minor-mode-cycle' (Emacs 28.1+) binds TAB on a heading to
 `outline-cycle' and S-TAB to `outline-cycle-buffer'.  This wins over the major
 mode's TAB on headings because outline installs the binding on the heading via
-an overlay keymap (higher precedence than the major-mode map); off a heading TAB
-falls through to the mode (e.g. `markdown-cycle').  It works in GUI too:
-`markdown-mode' binds TAB as `[9]' (not `<tab>'), so a GUI `<tab>' with no
+an overlay keymap (higher precedence than the major-mode map).  It works in GUI
+too: `markdown-mode' binds TAB as `[9]' (not `<tab>'), so a GUI `<tab>' with no
 binding is translated to `[9]' and lands on `outline-cycle' on a heading.
 Every section whose role is not in
 `tincan-unfolded-sections' (default `("USER" "ASSISTANT")') starts folded,
@@ -284,9 +283,15 @@ Folding is overlay-based, so it works in the read-only buffer with no
 (tracked by `tincan--fold-marker', the same idiom as the scan marker) and never
 folds the still-arriving last section, so streaming folds new sections exactly
 once and never re-folds one the user manually opened.
-TAB cycles only on the section's heading line, not anywhere within the section -
-that is `outline-minor-mode-cycle''s behavior (see D23 for the Emacs floor it
-relies on).
+`outline-minor-mode-cycle' cycles only on the heading line; to fold from within
+a section's body too, the view map binds both `TAB' and `<tab>' to
+`tincan-cycle', which goes back to the enclosing heading and calls
+`outline-cycle'.  On a heading the heading-local cycle map still wins (that path
+is unchanged); elsewhere `tincan-cycle' runs, which also shadows `markdown-cycle'
+off-heading - avoiding its misnavigation on the non-Markdown `outline-regexp'.
+Binding `<tab>' as well as `TAB' is what makes the body case win over the
+major mode's own `<tab>' in a GUI.  (See D23 for the Emacs floor folding relies
+on.)
 
 ### D23 - Emacs 30.1 floor
 `Package-Requires' is `((emacs "30.1"))'.  The folding (D22) relies on
@@ -484,10 +489,11 @@ finest to coarsest - `n'/`p'/`u' the outline family (org/outline speed-key
 style: every heading, @@@ marker or Markdown heading, `u' climbing to the
 enclosing @@@ and a quiet no-op at the top), `M-n'/`M-p' (only @@@ section
 markers, skipping Markdown headings; seldom needed, hence the modifier), and
-`['/`]' (USER/ASSISTANT turns only, skipping thinking/tool) - plus `q' (bury),
-`r' (reply), `t' (terminal), `w' (copy the code block at point, else the section
-body), `RET' (`find-file-at-point'), and `?' (`describe-mode').  Plain line
-motion stays on `C-n'/`C-p' and the arrows.  Rationale: the two common motions
+`['/`]' (USER/ASSISTANT turns only, skipping thinking/tool) - plus `TAB' (fold
+the section at point, from its heading or body; see D22), `/' (`isearch-forward',
+less/vim style), `q' (bury), `r' (reply), `t' (terminal), `w' (copy the code
+block at point, else the section body), `RET' (`find-file-at-point'), and `?'
+(`describe-mode').  Plain line motion stays on `C-n'/`C-p' and the arrows.  Rationale: the two common motions
 (heading and turn) get single keys and the rare one (all sections) the modifier,
 matching observed use; `n'/`p'/`u' borrows outline speed-key habits.  The
 terminal is a
