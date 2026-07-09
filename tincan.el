@@ -542,26 +542,32 @@ just will not appear if the optional hook is absent or watching is unsupported."
     (define-key map (kbd "C-c k") #'tincan-close)
     (define-key map (kbd "C-c 0") #'tincan-delete-terminal-window)
     (define-key map (kbd "q") #'quit-window)
-    ;; Read-only buffer, so single keys are free for viewer-style navigation
-    ;; (special-mode/Info conventions).  TAB/S-TAB folding is handled by
-    ;; outline-minor-mode-cycle's heading overlay keymap, so it is not set here.
-    (define-key map (kbd "n") #'next-line)
-    (define-key map (kbd "p") #'previous-line)
+    ;; Read-only buffer, so single keys are free for viewer-style navigation.
+    ;; TAB/S-TAB folding is handled by outline-minor-mode-cycle's heading overlay
+    ;; keymap, so it is not set here.
     (define-key map (kbd "SPC") #'scroll-up-command)
     (define-key map (kbd "DEL") #'scroll-down-command)
     (define-key map (kbd "S-SPC") #'scroll-down-command)
     (define-key map (kbd "<") #'beginning-of-buffer)
     (define-key map (kbd ">") #'end-of-buffer)
-    (define-key map (kbd "M-n") #'outline-next-visible-heading)
-    (define-key map (kbd "M-p") #'outline-previous-visible-heading)
-    ;; Reader-style actions and turn-only navigation.
+    ;; Three navigation tiers, finest to coarsest.  n/p/u is the outline family
+    ;; (org/outline speed-key style): every heading - @@@ markers and Markdown
+    ;; headings - with u climbing to the enclosing @@@.  M-n/M-p (seldom needed)
+    ;; visit only @@@ section markers.  [ / ] jump the conversation turns
+    ;; (USER/ASSISTANT).  Plain line motion stays on C-n/C-p and the arrows.
+    (define-key map (kbd "n") #'outline-next-visible-heading)
+    (define-key map (kbd "p") #'outline-previous-visible-heading)
+    (define-key map (kbd "u") #'tincan-up-heading)
+    (define-key map (kbd "M-n") #'tincan-next-section)
+    (define-key map (kbd "M-p") #'tincan-previous-section)
+    (define-key map (kbd "[") #'tincan-previous-turn)
+    (define-key map (kbd "]") #'tincan-next-turn)
+    ;; Reader-style actions.
     (define-key map (kbd "r") #'tincan-reply)
     (define-key map (kbd "t") #'tincan-switch-terminal)
     (define-key map (kbd "w") #'tincan-copy-section)
     (define-key map (kbd "RET") #'find-file-at-point)
     (define-key map (kbd "?") #'describe-mode)
-    (define-key map (kbd "M-}") #'tincan-next-turn)
-    (define-key map (kbd "M-{") #'tincan-previous-turn)
     map)
   "Keys layered onto a live tincan view buffer (see D37).
 Composed over the major mode's map so reply/switch/close/dismiss work while the
@@ -570,25 +576,58 @@ Markdown view keeps its own bindings.")
 (defvar tincan--turn-regexp "^@@@ \\(?:USER\\|ASSISTANT\\)\\b"
   "Marker lines that begin an actual conversation turn (USER/ASSISTANT).")
 
-(defun tincan-next-turn (&optional n)
-  "Move to the Nth next USER/ASSISTANT marker, skipping tool/thinking sections.
-Interactively N is the prefix argument; a negative N moves backward."
-  (interactive "p")
+(defvar tincan--marker-regexp "^@@@ [A-Z_]+"
+  "Any @@@ ROLE section-marker line, whatever the role.")
+
+(defun tincan--move-marker (regexp n what)
+  "Move to the Nth line matching REGEXP; a negative N moves backward.
+WHAT names the unit in the \"no more\" message.  Searching from the line end
+\(forward) or beginning (backward) makes a stop on the current marker count."
   (let* ((n (or n 1))
          (back (< n 0))
          (search (if back #'re-search-backward #'re-search-forward)))
     (dotimes (_ (abs n))
       (let ((origin (point)))
         (if back (beginning-of-line) (end-of-line))
-        (if (funcall search tincan--turn-regexp nil t)
+        (if (funcall search regexp nil t)
             (goto-char (match-beginning 0))
           (goto-char origin)
-          (message "tincan: no %s turn" (if back "earlier" "later")))))))
+          (message "tincan: no %s %s" (if back "earlier" "later") what))))))
+
+(defun tincan-next-turn (&optional n)
+  "Move to the Nth next USER/ASSISTANT marker, skipping tool/thinking sections.
+Interactively N is the prefix argument; a negative N moves backward."
+  (interactive "p")
+  (tincan--move-marker tincan--turn-regexp n "turn"))
 
 (defun tincan-previous-turn (&optional n)
   "Move to the Nth previous USER/ASSISTANT marker (see `tincan-next-turn')."
   (interactive "p")
   (tincan-next-turn (- (or n 1))))
+
+(defun tincan-next-section (&optional n)
+  "Move to the Nth next @@@ section marker of any role.
+Between `outline-next-visible-heading' (every marker and Markdown heading) and
+`tincan-next-turn' (USER/ASSISTANT only): this stops at every @@@ marker but
+skips Markdown headings inside messages.  N is the prefix arg; negative moves
+backward."
+  (interactive "p")
+  (tincan--move-marker tincan--marker-regexp n "section"))
+
+(defun tincan-previous-section (&optional n)
+  "Move to the Nth previous @@@ section marker (see `tincan-next-section')."
+  (interactive "p")
+  (tincan-next-section (- (or n 1))))
+
+(defun tincan-up-heading ()
+  "Move to the parent heading, climbing to the enclosing @@@ section marker.
+Each call goes up one outline level; from a Markdown heading it lands on its
+parent heading and, when none remains, on the section's @@@ marker (level 1).
+On a top-level @@@ marker there is nothing above, so it is a quiet no-op."
+  (interactive)
+  (condition-case nil
+      (outline-up-heading 1)
+    (error (message "tincan: already at the top-level section"))))
 
 (defun tincan--code-block-at-point ()
   "If point is inside a fenced code block, return (BEG . END) of its content.

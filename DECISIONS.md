@@ -479,10 +479,17 @@ tincan binds no global keys (bind them yourself if wanted).  In-session keys liv
 in buffer-local maps.  View and terminal share `C-c SPC' (reply), `C-c o' (go to
 the sibling buffer), and `C-c k' (close the session).  The view adds `C-c 0'
 (dismiss the terminal window) and, since it is read-only, single-key viewer
-commands: `n'/`p' (line), `SPC'/`DEL' (page), `<'/`>' (ends), `M-n'/`M-p' (any
-heading), `M-{'/`M-}' (USER/ASSISTANT turns only, skipping thinking/tool), `q'
-(bury), `r' (reply), `t' (terminal), `w' (copy the code block at point, else the
-section body), `RET' (`find-file-at-point'), and `?' (`describe-mode').  The
+commands: `SPC'/`DEL' (page), `<'/`>' (ends), and three navigation tiers from
+finest to coarsest - `n'/`p'/`u' the outline family (org/outline speed-key
+style: every heading, @@@ marker or Markdown heading, `u' climbing to the
+enclosing @@@ and a quiet no-op at the top), `M-n'/`M-p' (only @@@ section
+markers, skipping Markdown headings; seldom needed, hence the modifier), and
+`['/`]' (USER/ASSISTANT turns only, skipping thinking/tool) - plus `q' (bury),
+`r' (reply), `t' (terminal), `w' (copy the code block at point, else the section
+body), `RET' (`find-file-at-point'), and `?' (`describe-mode').  Plain line
+motion stays on `C-n'/`C-p' and the arrows.  Rationale: the two common motions
+(heading and turn) get single keys and the rare one (all sections) the modifier,
+matching observed use; `n'/`p'/`u' borrows outline speed-key habits.  The
 terminal is a
 `tincan-terminal-mode' minor mode layered over vterm (its lighter doubles as an
 identity cue); it adds `C-c C-c' -> send a real interrupt to Claude, restored

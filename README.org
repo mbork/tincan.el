@@ -63,8 +63,12 @@ Keys - view:
 - =C-c k= - close the session (ends Claude in the terminal)
 - =C-c 0= - delete the terminal window
 - =q= - bury the view
-- =n= / =p= - line down / up; =SPC= / =DEL= - page down / up; =<= / =>= - buffer ends
-- =M-n= / =M-p= - next / previous heading; =M-}= / =M-{= - next / previous turn
+- =SPC= / =DEL= - page down / up; =<= / =>= - buffer ends (line motion on =C-n= /
+  =C-p= and the arrows)
+- navigation, finest to coarsest: =n= / =p= / =u= - next / previous / up over any
+  heading (@@@ marker or Markdown heading; =u= climbs to the enclosing @@@);
+  =M-n= / =M-p= - only @@@ section markers; =[= / =]= - previous / next
+  USER / ASSISTANT turn
 - =w= - copy the section (or code block) at point
 - =RET= - visit the file at point; =?= - describe the mode
 
