@@ -621,3 +621,16 @@ placed last so it overrides the role face on the trailing span; the keyword
 matches only a real `YYYY-MM-DD HH:MM:SS' at end of an `@@@' line, so markers
 without a timestamp are untouched.  State detection is unaffected: it keys on the
 `@@@ DONE' prefix, which still leads the line.
+
+### D44 - Shift-RET inserts a newline in Claude's prompt (no submit)
+`S-<return>' in the terminal runs `tincan-terminal-send-newline', which sends a
+lone newline as a *bracketed paste* (`vterm-send-string "\n" t').  libvterm
+drops the Shift modifier on Return, so a plain Shift-RET reaches Claude as a bare
+CR and its TUI submits; a bracketed paste is inserted literally, so the newline
+lands in the input instead - the same trick tincan uses for multi-line replies.
+The binding lives in `tincan-terminal-mode-map' (a minor-mode map, so it outranks
+vterm's own Return handling) rather than in `vterm-mode-map', so it applies to
+tincan terminals only.  On a tty frame it needs a keyboard protocol such as kkp
+so `S-<return>' arrives as a distinct key; otherwise Emacs shift-translates it to
+plain RET and the binding never fires.  (Previously lived in the user's personal
+`wrap-vterm.el' on `vterm-mode-map'; moved here as the owning concern.)

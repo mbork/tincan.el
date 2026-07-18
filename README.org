@@ -77,6 +77,7 @@ Keys - view:
 Keys - terminal:
 - =C-c SPC= - reply; =C-c o= - go to the view; =C-c k= - close the session
 - =C-c C-c= - send a real interrupt (C-c) to Claude
+- =S-RET= - newline in Claude's prompt without submitting (needs kkp on a tty)
 - =C-z= - disabled (would suspend the TUI)
 
 Compose buffer:

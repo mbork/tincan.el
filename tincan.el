@@ -908,6 +908,8 @@ this if multi-line replies are not submitted; 0 sends the Return immediately."
     ;; Swallow C-z: vterm would forward it as SIGTSTP, suspending Claude with
     ;; no job-control shell to resume it (D37).
     (define-key map (kbd "C-z") #'ignore)
+    ;; Shift-RET inserts a newline in Claude's prompt without submitting (D44).
+    (define-key map (kbd "S-<return>") #'tincan-terminal-send-newline)
     map)
   "Keys for `tincan-terminal-mode' (layered over vterm; see D37).")
 
@@ -923,6 +925,18 @@ cue (D36/D37)."
   "Send a real C-c (interrupt) to Claude in this terminal."
   (interactive)
   (vterm-send-C-c))
+
+(defun tincan-terminal-send-newline ()
+  "Insert a newline in Claude's prompt without submitting it (D44).
+libvterm drops the Shift modifier on Return, so a plain Shift-RET sends a bare
+CR that Claude's TUI treats as submit.  Send the newline as a bracketed paste
+instead: a TUI inserts pasted text literally, so the newline lands in the input
+rather than submitting it (the same trick tincan uses for multi-line replies).
+On a tty frame this needs a keyboard protocol such as kkp so that S-<return>
+arrives as a distinct key; otherwise Emacs shift-translates it to plain RET and
+this never runs."
+  (interactive)
+  (vterm-send-string "\n" t))
 
 ;; A terse placeholder hint for the user to expand; see DECISIONS.md (D36).
 (defun tincan--terminal-hint-string ()
