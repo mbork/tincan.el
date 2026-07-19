@@ -433,15 +433,36 @@ session's two buffers carry the same label (D27)."
   (format "*tincan terminal: %s*" (tincan--buffer-label session-id title)))
 
 ;; ** Session selection
-(defun tincan--list-sessions (&optional all)
+(defcustom tincan-recent-days 7
+  "Default days of activity the session picker shows (D40).
+`tincan-resume'/`tincan-view' list only sessions active within this many days;
+each C-u widens (see `tincan-resume')."
+  :type 'integer
+  :group 'tincan)
+
+(defun tincan--resume-scope (arg)
+  "Map raw prefix ARG to a (ALL . DAYS) picker scope - pivot-1 broadening (D40).
+Each C-u widens one notch: nil = this project, last `tincan-recent-days' days;
+C-u = this project, all history; C-u C-u = all projects, last N days;
+C-u C-u C-u (or more) = all projects, all history.  DAYS nil means no limit."
+  (pcase arg
+    ('nil  (cons nil tincan-recent-days))
+    ('(4)  (cons nil nil))
+    ('(16) (cons t   tincan-recent-days))
+    (_     (cons t   nil))))
+
+(defun tincan--list-sessions (&optional all days)
   "Return an alist of (DISPLAY . PLIST) for sessions; PLIST has :id :title :cwd.
 Without ALL, list the sessions of the closest launch directory at or above
-`default-directory'.  With ALL, list every project's sessions.  DISPLAY is
+`default-directory'.  With ALL, list every project's sessions.  DAYS, when
+non-nil, keeps only sessions active within that many days.  DISPLAY is
 title-first - \"TITLE  DATE\", or \"TITLE  DATE  DIR\" under ALL - so the two
 scopes share one format and any field narrows (D40).  Runs tincan.py in
 `default-directory'."
   (with-temp-buffer
-    (let* ((args (append '("--show-sessions") (and all '("--all"))))
+    (let* ((args (append '("--show-sessions")
+                         (and all '("--all"))
+                         (and days (list "--days" (number-to-string days)))))
            (code (apply #'call-process "python3" nil t nil tincan-script args)))
       (unless (= code 0)
         (error "tincan: --show-sessions failed: %s" (string-trim (buffer-string))))
@@ -477,15 +498,15 @@ to the list order so tincan.py's ordering survives (D40)."
                    (cycle-sort-function . identity))
       (complete-with-action action sessions string predicate))))
 
-(defun tincan--read-session (&optional all)
+(defun tincan--read-session (&optional all days)
   "Prompt for a session; return its PLIST (:id :title :cwd).
-With ALL, choose among every project's sessions instead of this project's."
-  (let ((sessions (tincan--list-sessions all)))
+ALL chooses among every project's sessions; DAYS limits to sessions active
+within that many days (see `tincan--resume-scope')."
+  (let ((sessions (tincan--list-sessions all days)))
     (unless sessions
-      (if all
-          (user-error "tincan: no sessions found")
-        (user-error "tincan: no sessions under %s (use C-u for all projects)"
-                    default-directory)))
+      (user-error "tincan: no sessions (%s, %s); C-u widens the list"
+                  (if all "all projects" "this project")
+                  (if days (format "last %d days" days) "all history")))
     (let ((choice (completing-read "tincan session: "
                                    (tincan--session-collection sessions) nil t)))
       (cdr (assoc choice sessions)))))
@@ -967,12 +988,14 @@ title (hence the name) can change; BUFFER-NAME names a freshly created one."
 (defun tincan-view (session-id &optional title)
   "Watch a Claude Code SESSION-ID live in a read-only buffer.
 TITLE, if given, is shown (abbreviated) in the buffer name.
-Interactively choose among this project's sessions; with a prefix argument,
-choose among all projects' sessions (narrow by title or directory).
+Interactively choose from the session picker; the prefix argument widens it in
+notches, exactly as for `tincan-resume' (none = this project's recent sessions,
+up to C-u C-u C-u = all projects, all history).
 This only observes; to reply, start or attach a terminal (see `tincan-start',
 `tincan-attach')."
   (interactive
-   (let ((plist (tincan--read-session current-prefix-arg)))
+   (let* ((scope (tincan--resume-scope current-prefix-arg))
+          (plist (tincan--read-session (car scope) (cdr scope))))
      (list (plist-get plist :id) (plist-get plist :title))))
   (pop-to-buffer
    (tincan--watch session-id (tincan--buffer-name session-id title))))
@@ -1250,13 +1273,18 @@ default use `tincan' (`tincan-dwim')."
   (tincan--start-new))
 
 ;;;###autoload
-(defun tincan-resume (&optional all)
+(defun tincan-resume (&optional arg)
   "Resume an existing Claude session (D40).
-List this project's sessions; with a prefix argument ALL, list every project's.
-The resumed session always relaunches in its own recorded directory; ALL widens
-only the list, not the launch directory."
+The prefix ARG widens the picker in notches; each C-u shows more:
+  none         this project, last `tincan-recent-days' days
+  C-u          this project, all history
+  C-u C-u      all projects, last `tincan-recent-days' days
+  C-u C-u C-u  all projects, all history
+The resumed session always relaunches in its own recorded directory; the prefix
+widens only the list, never the launch directory."
   (interactive "P")
-  (let ((plist (tincan--read-session all)))
+  (let* ((scope (tincan--resume-scope arg))
+         (plist (tincan--read-session (car scope) (cdr scope))))
     (tincan--resume-session (plist-get plist :id)
                             (plist-get plist :title)
                             (plist-get plist :cwd))))

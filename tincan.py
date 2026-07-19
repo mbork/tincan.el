@@ -12,7 +12,7 @@ import shutil
 import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # * Configuration
@@ -405,7 +405,19 @@ def is_ancestor(parent, child):
     except ValueError:
         return False
 
-def show_sessions(show_all=False):
+def within_days(timestamp, days):
+    # True if TIMESTAMP (the session's most recent activity) is within DAYS days
+    # of now.  DAYS None means no limit; an undatable session is kept rather than
+    # silently hidden.
+    if days is None or not timestamp:
+        return True
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return parsed >= datetime.now(timezone.utc) - timedelta(days=days)
+
+def show_sessions(show_all=False, days=None):
     metas = [read_session_meta(path) for path in iter_session_files()]
     if show_all:
         selected = metas
@@ -417,6 +429,8 @@ def show_sessions(show_all=False):
         ancestors = [m for m in metas if m["cwd"] and is_ancestor(m["cwd"], here)]
         root = max((m["cwd"] for m in ancestors), key=len, default=None)
         selected = [m for m in ancestors if m["cwd"] == root] if root else []
+    if days is not None:
+        selected = [m for m in selected if within_days(m["timestamp"], days)]
     selected.sort(key=lambda meta: meta["timestamp"] or "", reverse=True)
     for meta in selected:
         line = "{}\t{}\t{}\t{}\n".format(
@@ -561,6 +575,9 @@ def build_parser():
         "--all", action="store_true",
         help="with --show-sessions, list every project's sessions, not just here")
     parser.add_argument(
+        "--days", type=int, metavar="N",
+        help="with --show-sessions, keep only sessions active within the last N days")
+    parser.add_argument(
         "--notification-hook", action="store_true",
         help="run as a Claude Code Notification hook (reads event JSON on stdin)")
     parser.add_argument(
@@ -597,7 +614,7 @@ def main():
             sys.exit(uninstall_hook(settings_path))
         sys.exit(check_hook(settings_path))
     if args.show_sessions:
-        show_sessions(args.all)
+        show_sessions(args.all, args.days)
         return
     if not args.session:
         parser.error("a session id is required (or use --show-sessions)")

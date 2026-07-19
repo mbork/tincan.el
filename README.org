@@ -50,9 +50,12 @@ Commands:
   id, runs =claude --session-id <id>=, shows the terminal, view follows behind
 - =M-x tincan-resume= - resume an existing session, picked from a list; relaunches
   =claude --resume <id>= in the session's own recorded directory; shows the view,
-  terminal buried.  =C-u= widens the list to every project
-- =M-x tincan-view= - observe a session read-only (no terminal, no replies); =C-u=
-  for all projects
+  terminal buried.  The prefix widens the list in notches (each =C-u= shows more):
+  none = this project, last =tincan-recent-days= (7) days; =C-u= = this project,
+  all history; =C-u C-u= = all projects, last N days; =C-u C-u C-u= = all
+  projects, all history
+- =M-x tincan-view= - observe a session read-only (no terminal, no replies); same
+  prefix widening as =tincan-resume=
 - =M-x tincan-attach= - from a terminal buffer, (re)build and link its view
 - =M-x tincan-rename= - rename the view and terminal buffers to the session's
   current title (picks up a =/rename=)
@@ -166,11 +169,12 @@ M-x tincan-view
 #+end_src
 
 Run it from the project (any subdirectory works).  It lists that project's
-sessions, lets you pick one, launches =tincan.py --follow=, and shows the
-rendered transcript in a read-only buffer that updates as Claude works.  With a
-prefix argument (=C-u M-x tincan-view=) it offers every project's session instead
-- narrow by title or directory - for when you are outside the project tree.  To
-drive Claude rather than only watch, use =M-x tincan= (the front door) - see
+recent sessions (last =tincan-recent-days= days), lets you pick one, launches
+=tincan.py --follow=, and shows the rendered transcript in a read-only buffer
+that updates as Claude works.  The prefix argument widens the list in notches
+(each =C-u= shows more: this project all history, then all projects) - narrow by
+title or directory once broadened.  To drive Claude rather than only watch, use
+=M-x tincan= (the front door) - see
 [[*Input mode - usage][Input mode - usage]] above.
 
 Narrowing by directory in that picker depends on your completion setup: Ivy,
