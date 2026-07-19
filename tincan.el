@@ -1254,6 +1254,9 @@ Shows the terminal; the view follows it in the background."
 (defun tincan--resume-session (id title cwd)
   "Resume session ID (TITLE), launching Claude in its own CWD; return the view.
 The launch directory is the session's recorded CWD, never the current one (D40).
+Both buffers' `default-directory' are set to it too, so commands run from the
+view or terminal act on the session's project - not wherever we were invoked
+from, which differs when resuming across projects (e.g. C-u C-u).
 Shows the view and leaves the terminal buried."
   (tincan--require-vterm)
   (let* ((dir (if (and cwd (not (string-empty-p cwd))) cwd default-directory))
@@ -1261,6 +1264,10 @@ Shows the view and leaves the terminal buried."
          (terminal (tincan--make-terminal id command dir title nil))
          (view (tincan--watch id (tincan--buffer-name id title))))
     (tincan--link view terminal id)
+    (dolist (buffer (list view terminal))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (setq-local default-directory (file-name-as-directory dir)))))
     (pop-to-buffer view)
     view))
 

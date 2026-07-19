@@ -545,6 +545,10 @@ the earlier `tincan-start' that overloaded the prefix arg for new-vs-resume.
 - `tincan-resume' resumes an existing session; the prefix widens the picker in
   notches (see Scope).  The resumed Claude always relaunches in the session's own
   recorded `cwd' - the prefix widens only the *list*, never the launch directory.
+  Both the view and terminal buffers also get that `cwd' as their
+  `default-directory', so commands run from either (find-file-at-point, etc.) act
+  on the session's project, not wherever `tincan-resume' was invoked (which
+  differs when resuming across projects with C-u C-u).
 - `tincan-view' (read-only) is unchanged but shares the list format below.
 - `tincan-attach' (escape hatch) is unchanged.
 - `tincan' (alias of `tincan-dwim') is the front door: a 3-way DWIM, current
