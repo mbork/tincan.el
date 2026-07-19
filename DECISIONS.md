@@ -489,11 +489,13 @@ finest to coarsest - `n'/`p'/`u' the outline family (org/outline speed-key
 style: every heading, @@@ marker or Markdown heading, `u' climbing to the
 enclosing @@@ and a quiet no-op at the top), `M-n'/`M-p' (only @@@ section
 markers, skipping Markdown headings; seldom needed, hence the modifier), and
-`['/`]' (USER/ASSISTANT turns only, skipping thinking/tool) - plus `TAB' (fold
-the section at point, from its heading or body; see D22), `/' (`isearch-forward',
-less/vim style), `q' (bury), `r' (reply), `t' (terminal), `w' (copy the code
-block at point, else the section body), `RET' (`find-file-at-point'), and `?'
-(`describe-mode').  Plain line motion stays on `C-n'/`C-p' and the arrows.  Rationale: the two common motions
+`['/`]' (USER/ASSISTANT turns only, skipping thinking/tool) - all three skipping
+sections hidden by `c' - plus `TAB' (fold the section at point, from its heading
+or body; see D22), `c' (`tincan-conversation-only', hide non-conversation
+sections; see D45), `/' (`isearch-forward', less/vim style), `q' (bury), `r'
+(reply), `t' (terminal), `w' (copy the code block at point, else the section
+body), `RET' (`find-file-at-point'), and `?' (`describe-mode').  Plain line
+motion stays on `C-n'/`C-p' and the arrows.  Rationale: the two common motions
 (heading and turn) get single keys and the rare one (all sections) the modifier,
 matching observed use; `n'/`p'/`u' borrows outline speed-key habits.  The
 terminal is a
@@ -634,3 +636,41 @@ tincan terminals only.  On a tty frame it needs a keyboard protocol such as kkp
 so `S-<return>' arrives as a distinct key; otherwise Emacs shift-translates it to
 plain RET and the binding never fires.  (Previously lived in the user's personal
 `wrap-vterm.el' on `vterm-mode-map'; moved here as the owning concern.)
+
+### D45 - `tincan-conversation-only': hide whole noise sections (not fold)
+`c' toggles `tincan-conversation-only', which hides every section whose role is
+not in `tincan-unfolded-sections' (default USER/ASSISTANT) - the *whole* section,
+heading line included, not just its body as folding (D22) does.  This is a filter
+(invisibility), a different mechanism from folding.
+It hides with an invisible *overlay* (value `tincan-conversation', added to
+`buffer-invisibility-spec' as a bare symbol so there is no ellipsis) over each
+section's span, from its @@@ heading to the next @@@ marker; the overlays are
+tracked buffer-locally and deleted to reveal.  Overlays, not a text property,
+because Markdown mode lists `invisible' in `font-lock-extra-managed-props', so a
+text property is stripped on the next refontification - leaving only the
+between-block newlines hidden (the symptom that forced this).  The dedicated
+value also keeps it decoupled from outline folding: `outline-show-all'/S-TAB
+remove only `invisible'=`outline' overlays, so these survive.
+The stray-ellipsis fix is the subtle part.  The hiding overlay's own value never
+draws an ellipsis (bare spec), but a *folded conversation* section sitting right
+before a hidden noise section does: outline's `(outline . t)' spec draws its
+`...', and because the collapsed noise leaves no visible newline after it, that
+ellipsis renders against the *next* visible heading - a leading `...'.  It is the
+outline invisibility, not ours, so a `display' property on our overlay cannot
+suppress it.  So while hiding, `tincan--outline-ellipsis' swaps the `outline'
+spec from `(outline . t)' to the bare symbol, silencing every fold ellipsis for
+the duration (restored on reveal); folded conversation sections then show as bare
+headings, which reads cleaner for this mode anyway.  A high `priority' on the
+hiding overlay outranks any fold overlay underneath for good measure.
+Navigation skips the hidden sections.  `tincan--move-marker' (M-n/M-p sections,
+[/] turns) now skips matches whose start is `invisible-p'.  n/p were repointed
+from `outline-next-visible-heading' to `tincan-next-heading', which drives the
+same helper with an all-headings regexp - equivalent to the outline command for
+folds (a folded heading stays visible; a heading hidden inside a folded ancestor
+is `invisible-p' and skipped either way) but also skipping conversation-hidden
+sections, which the outline command would not (`outline-invisible-p' only tests
+for the `outline' value).  `u' stays on `outline-up-heading' (it only climbs
+within a visible section).
+It is a snapshot: sections streaming in while it is on are not hidden until the
+next toggle.  Reusing `tincan-unfolded-sections' keeps this "conversation" notion
+aligned with the default fold set rather than hardcoding the two roles.

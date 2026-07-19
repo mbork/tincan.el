@@ -557,9 +557,10 @@ just will not appear if the optional hook is absent or watching is unsupported."
     ;; (org/outline speed-key style): every heading - @@@ markers and Markdown
     ;; headings - with u climbing to the enclosing @@@.  M-n/M-p (seldom needed)
     ;; visit only @@@ section markers.  [ / ] jump the conversation turns
-    ;; (USER/ASSISTANT).  Plain line motion stays on C-n/C-p and the arrows.
-    (define-key map (kbd "n") #'outline-next-visible-heading)
-    (define-key map (kbd "p") #'outline-previous-visible-heading)
+    ;; (USER/ASSISTANT).  All three skip sections hidden by `c' (see below).
+    ;; Plain line motion stays on C-n/C-p and the arrows.
+    (define-key map (kbd "n") #'tincan-next-heading)
+    (define-key map (kbd "p") #'tincan-previous-heading)
     (define-key map (kbd "u") #'tincan-up-heading)
     (define-key map (kbd "M-n") #'tincan-next-section)
     (define-key map (kbd "M-p") #'tincan-previous-section)
@@ -567,6 +568,7 @@ just will not appear if the optional hook is absent or watching is unsupported."
     (define-key map (kbd "]") #'tincan-next-turn)
     ;; Reader-style actions.
     (define-key map (kbd "/") #'isearch-forward)
+    (define-key map (kbd "c") #'tincan-conversation-only)
     (define-key map (kbd "r") #'tincan-reply)
     (define-key map (kbd "t") #'tincan-switch-terminal)
     (define-key map (kbd "w") #'tincan-copy-section)
@@ -583,20 +585,40 @@ Markdown view keeps its own bindings.")
 (defvar tincan--marker-regexp "^@@@ [A-Z_]+"
   "Any @@@ ROLE section-marker line, whatever the role.")
 
+(defvar tincan--heading-regexp "^\\(?:@@@\\|#+\\) "
+  "Any outline heading in the view: an @@@ marker or a Markdown heading.")
+
 (defun tincan--move-marker (regexp n what)
-  "Move to the Nth line matching REGEXP; a negative N moves backward.
-WHAT names the unit in the \"no more\" message.  Searching from the line end
-\(forward) or beginning (backward) makes a stop on the current marker count."
+  "Move to the Nth visible line matching REGEXP; a negative N moves backward.
+WHAT names the unit in the \"no more\" message.  Matches inside sections hidden
+by `tincan-conversation-only' are invisible and skipped.  Searching from the
+line end (forward) or beginning (backward) makes each step leave this line."
   (let* ((n (or n 1))
          (back (< n 0))
          (search (if back #'re-search-backward #'re-search-forward)))
     (dotimes (_ (abs n))
-      (let ((origin (point)))
+      (let ((origin (point))
+            (target nil))
         (if back (beginning-of-line) (end-of-line))
-        (if (funcall search regexp nil t)
-            (goto-char (match-beginning 0))
+        (while (and (null target) (funcall search regexp nil t))
+          (unless (invisible-p (match-beginning 0))
+            (setq target (match-beginning 0))))
+        (if target
+            (goto-char target)
           (goto-char origin)
           (message "tincan: no %s %s" (if back "earlier" "later") what))))))
+
+(defun tincan-next-heading (&optional n)
+  "Move to the Nth next visible heading - an @@@ marker or a Markdown heading.
+The finest of the three navigation tiers; skips sections hidden by
+`tincan-conversation-only'.  N is the prefix arg; negative moves backward."
+  (interactive "p")
+  (tincan--move-marker tincan--heading-regexp n "heading"))
+
+(defun tincan-previous-heading (&optional n)
+  "Move to the Nth previous visible heading (see `tincan-next-heading')."
+  (interactive "p")
+  (tincan-next-heading (- (or n 1))))
 
 (defun tincan-next-turn (&optional n)
   "Move to the Nth next USER/ASSISTANT marker, skipping tool/thinking sections.
@@ -611,7 +633,7 @@ Interactively N is the prefix argument; a negative N moves backward."
 
 (defun tincan-next-section (&optional n)
   "Move to the Nth next @@@ section marker of any role.
-Between `outline-next-visible-heading' (every marker and Markdown heading) and
+Between `tincan-next-heading' (every marker and Markdown heading) and
 `tincan-next-turn' (USER/ASSISTANT only): this stops at every @@@ marker but
 skips Markdown headings inside messages.  N is the prefix arg; negative moves
 backward."
@@ -643,6 +665,84 @@ the enclosing heading and cycling it, so TAB folds a section from anywhere."
       (progn (outline-back-to-heading)
              (outline-cycle))
     (error (message "tincan: no section to fold here"))))
+
+(defvar-local tincan--conversation-only nil
+  "Non-nil when `tincan-conversation-only' is hiding non-conversation sections.")
+
+(defvar-local tincan--hidden-overlays nil
+  "Overlays that hide non-conversation sections for `tincan-conversation-only'.")
+
+(defun tincan--outline-ellipsis (show)
+  "Make outline folds draw an ellipsis when SHOW is non-nil, else be silent.
+`tincan-conversation-only' silences it while hiding: a folded conversation
+section next to a hidden noise section would otherwise render its `...' against
+the following visible heading (a leading ellipsis), because the collapsed noise
+leaves no visible newline between them.  Toggles the `outline' invisibility spec
+between the ellipsis form `(outline . t)' and the bare symbol."
+  (if show
+      (progn (remove-from-invisibility-spec 'outline)
+             (add-to-invisibility-spec '(outline . t)))
+    (remove-from-invisibility-spec '(outline . t))
+    (add-to-invisibility-spec 'outline)))
+
+(defun tincan--hide-other-sections ()
+  "Hide every section whose role is not in `tincan-unfolded-sections'.
+Covers the whole section - its @@@ heading through to the next @@@ marker - with
+an invisible overlay (spec `tincan-conversation', a bare symbol so there is no
+ellipsis), so it leaves the display entirely.  Overlays, not text properties:
+Markdown mode lists `invisible' in `font-lock-extra-managed-props', so it strips
+a text property on the next refontification (leaving only the between-block
+newlines); and the dedicated value keeps `outline-show-all' - which removes only
+`invisible'=`outline' overlays - from touching these.  The `priority' outranks
+any outline fold overlay underneath.  Outline ellipses are silenced meanwhile
+\(see `tincan--outline-ellipsis')."
+  (add-to-invisibility-spec 'tincan-conversation)
+  (tincan--outline-ellipsis nil)
+  (save-excursion
+    (goto-char (point-min))
+    (while (re-search-forward "^@@@ \\([A-Z_]+\\)" nil t)
+      (let ((role (match-string 1))
+            (start (match-beginning 0)))
+        (unless (member role tincan-unfolded-sections)
+          (let* ((end (or (save-excursion
+                            (when (re-search-forward "^@@@ " nil t)
+                              (match-beginning 0)))
+                          (point-max)))
+                 (ov (make-overlay start end)))
+            (overlay-put ov 'invisible 'tincan-conversation)
+            (overlay-put ov 'priority 100)
+            (push ov tincan--hidden-overlays)))))))
+
+(defun tincan--show-all-sections ()
+  "Undo `tincan--hide-other-sections', revealing every hidden section."
+  (mapc #'delete-overlay tincan--hidden-overlays)
+  (setq tincan--hidden-overlays nil)
+  ;; `add-to-invisibility-spec' does not de-duplicate, so drop our entry here
+  ;; (its `delete' clears every copy) to keep repeated toggles from piling up.
+  (remove-from-invisibility-spec 'tincan-conversation)
+  (tincan--outline-ellipsis t))
+
+(defun tincan-conversation-only ()
+  "Toggle hiding of every section not in `tincan-unfolded-sections' (D45).
+When on, sections such as THINKING, TOOL_USE, TOOL_RESULT and DONE are made
+fully invisible - heading and body, not just folded - and skipped by the n/p,
+M-n/M-p and [/] navigation, leaving only the conversation (USER/ASSISTANT by
+default).  Toggle again to reveal them.  Acts on the current buffer contents;
+sections that stream in afterward are not hidden until you toggle again."
+  (interactive)
+  (if tincan--conversation-only
+      (progn (tincan--show-all-sections)
+             (setq tincan--conversation-only nil)
+             (message "tincan: showing all sections"))
+    (tincan--hide-other-sections)
+    ;; Point may have been inside a now-hidden section; move it somewhere shown.
+    ;; Try the enclosing heading above, then (if the buffer opens on a hidden
+    ;; section) the first visible heading below.
+    (when (invisible-p (point))
+      (tincan-previous-heading 1)
+      (when (invisible-p (point)) (tincan-next-heading 1)))
+    (setq tincan--conversation-only t)
+    (message "tincan: conversation only")))
 
 (defun tincan--code-block-at-point ()
   "If point is inside a fenced code block, return (BEG . END) of its content.

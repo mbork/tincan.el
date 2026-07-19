@@ -71,6 +71,7 @@ Keys - view:
   USER / ASSISTANT turn
 - =TAB= - fold the section at point (from its heading or its body); =S-TAB= -
   whole buffer
+- =c= - hide all sections except USER / ASSISTANT (toggle; navigation skips them)
 - =/= - search (=isearch-forward=); =w= - copy the section (or code block) at point
 - =RET= - visit the file at point; =?= - describe the mode
 
