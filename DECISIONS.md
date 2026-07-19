@@ -674,3 +674,28 @@ within a visible section).
 It is a snapshot: sections streaming in while it is on are not hidden until the
 next toggle.  Reusing `tincan-unfolded-sections' keeps this "conversation" notion
 aligned with the default fold set rather than hardcoding the two roles.
+
+### D46 - Auto-align Markdown tables via `markdown-table-align'
+The view aligns Markdown tables automatically as sections stream in
+(`tincan-format-tables', default t).  The alignment itself is `markdown-mode''s
+own `markdown-table-align', not a hand-rolled aligner: it already respects the
+delimiter row's alignment colons (`:---'/`---:'/`:--:') and uses
+`markdown--string-width' for correct Unicode/CJK widths - both of which a custom
+aligner would have to re-implement and likely get subtly wrong.  The cost is that
+it needs a Markdown-table mode active (`markdown-mode'/`gfm-mode'), so it is a
+no-op in the plain `tincan-view-mode' fallback and in bare `markdown-ts-mode';
+`tincan--tables-available-p' gates on `derived-mode-p 'markdown-mode'.
+Application mirrors `tincan--autofold' (D22): a buffer-local `tincan--table-marker'
+tracks progress; each complete @@@ section (one that already has a successor) has
+its tables aligned once and the marker advanced past it, and the last section is
+aligned too but the marker is left before it so it is re-aligned as more streams
+in.  Tables never arrive *partial* at the record level (tincan.py renders one
+whole JSONL record at a time), but chunked pipe I/O can split a section across
+filter chunks, hence the complete-section guard; `markdown-table-at-point-p' also
+needs a delimiter row, so a half-arrived table is skipped until it is real.
+`markdown-table-at-point-p' excludes fenced code, so tables inside tool output are
+left alone; `tincan--align-tables-in' `syntax-propertize's the region first so
+that exclusion is accurate on freshly streamed, not-yet-fontified text.  Runs from
+the filter after `tincan--autofold'; `tincan-align-tables' is a manual whole-buffer
+re-run (which works even when `tincan-format-tables' is nil, since it is an
+explicit request).

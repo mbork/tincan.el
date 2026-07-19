@@ -200,6 +200,11 @@ Customize which roles stay open with =tincan-unfolded-sections=.
 Markdown headings inside messages fold too: =TAB= on a Markdown heading
 (e.g. =##=) folds that heading's subtree; headings nest below the =@@@= sections.
 
+Markdown tables are aligned automatically as sections stream in (via
+=markdown-table-align=, so alignment colons and Unicode widths are respected);
+this needs a Markdown mode - it is a no-op in the =tincan-view-mode= fallback.
+=M-x tincan-align-tables= re-aligns the whole buffer on demand.
+
 To render a static transcript file instead (for example one you streamed to disk
 with =--follow > file=), open it and call =tincan-render-buffer= yourself,
 optionally with =auto-revert-tail-mode= for tail-following:
@@ -214,6 +219,7 @@ optionally with =auto-revert-tail-mode= for tail-following:
 Relevant options (=M-x customize-group RET tincan RET=):
 - =tincan-markdown-mode= - which Markdown mode to use, or =nil= to disable it.
 - =tincan-fontify-code-blocks-natively= - per-language code-block highlighting.
+- =tincan-format-tables= - auto-align Markdown tables as they stream in.
 
 ** Knowing when Claude wants your input (optional)
 

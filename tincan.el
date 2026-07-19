@@ -129,6 +129,18 @@ Every other section (THINKING, TOOL_USE, TOOL_RESULT, DONE, ...) starts folded."
 (defvar-local tincan--fold-marker nil
   "Marker up to which streamed @@@ sections have been auto-folded.")
 
+(defcustom tincan-format-tables t
+  "If non-nil, align Markdown tables in the view as sections stream in (D46).
+Uses `markdown-table-align', which respects the delimiter row's alignment
+colons and Unicode widths, so it applies only when a Markdown table mode
+\(`markdown-mode'/`gfm-mode') is active; it is a no-op in the plain
+`tincan-view-mode' fallback."
+  :type 'boolean
+  :group 'tincan)
+
+(defvar-local tincan--table-marker nil
+  "Marker up to which streamed @@@ sections have had their tables aligned.")
+
 (defun tincan--default-folded-p (role)
   "Non-nil if a section with ROLE should start folded."
   (not (member role tincan-unfolded-sections)))
@@ -172,7 +184,76 @@ which would misnavigate because `outline-regexp' is not Markdown's."
   (setq-local outline-minor-mode-cycle t)
   (outline-minor-mode 1)
   (setq-local tincan--fold-marker (copy-marker (point-min)))
+  (setq-local tincan--table-marker (copy-marker (point-min)))
   (tincan--autofold))
+
+;; * Table alignment
+;; Markdown tables arrive complete (tincan.py renders one whole record at a
+;; time), so alignment mirrors `tincan--autofold': from `tincan--table-marker',
+;; each complete @@@ section's tables are aligned once and the marker advanced;
+;; the last (still-arriving) section is aligned too but not passed, so it is
+;; re-aligned as more of it streams in.  `markdown-table-align' does the work,
+;; so this applies only in a Markdown-table mode (D46).
+(declare-function markdown-table-align "ext:markdown-mode")
+(declare-function markdown-table-at-point-p "ext:markdown-mode")
+(declare-function markdown-table-end "ext:markdown-mode")
+
+(defun tincan--tables-available-p ()
+  "Non-nil if `markdown-table-align' can run in this buffer's major mode."
+  (and (fboundp 'markdown-table-align)
+       (derived-mode-p 'markdown-mode)))
+
+(defun tincan--align-tables-in (beg end)
+  "Align every Markdown table between BEG and END; leave point at END.
+`markdown-table-at-point-p' already excludes fenced code, so tables in tool
+output are left alone; syntax is propertized first so that test is accurate on
+freshly streamed text."
+  (goto-char beg)
+  (syntax-propertize end)
+  (let ((limit (copy-marker end)))
+    (while (< (point) limit)
+      (if (markdown-table-at-point-p)
+          (let ((start (point)))
+            (condition-case nil (markdown-table-align) (error nil))
+            (goto-char (markdown-table-end))
+            (when (<= (point) start) (forward-line 1)))
+        (forward-line 1)))
+    (goto-char limit)
+    (set-marker limit nil)))
+
+(defun tincan--align-new-tables ()
+  "Align tables in @@@ sections streamed since `tincan--table-marker'.
+No-op unless a Markdown-table mode is active (`tincan--tables-available-p')."
+  (when (and tincan--table-marker tincan-format-tables (tincan--tables-available-p))
+    (let ((inhibit-read-only t))
+      (save-excursion
+        (goto-char tincan--table-marker)
+        (let ((heading (and (re-search-forward "^@@@ " nil t) (match-beginning 0))))
+          (while heading
+            ;; NEXT is a marker so it tracks the shift from padding this section.
+            (let ((next (save-excursion
+                          (goto-char heading)
+                          (forward-line 1)
+                          (and (re-search-forward "^@@@ " nil t)
+                               (copy-marker (match-beginning 0))))))
+              (tincan--align-tables-in heading (or next (point-max)))
+              (if next
+                  (progn (set-marker tincan--table-marker (marker-position next))
+                         (setq heading (marker-position next))
+                         (set-marker next nil))
+                (setq heading nil)))))))))
+
+(defun tincan-align-tables ()
+  "Align every Markdown table in the whole view now.
+Automatic alignment (`tincan-format-tables') already does this as sections
+stream in; this is a manual re-run."
+  (interactive)
+  (unless (tincan--tables-available-p)
+    (user-error "tincan: table alignment needs a Markdown mode (see `tincan-markdown-mode')"))
+  (let ((inhibit-read-only t))
+    (save-excursion (tincan--align-tables-in (point-min) (point-max)))
+    (when tincan--table-marker
+      (set-marker tincan--table-marker (point-max)))))
 
 ;; * Rendering
 (defcustom tincan-markdown-mode t
@@ -812,6 +893,7 @@ copy the body of the @@@ section at point (without the marker line)."
             (set-marker mark (point)))
           (tincan--scan-for-state mark)
           (tincan--autofold)
+          (tincan--align-new-tables)
           ;; Follow the tail in any window that was already at the end.
           (dolist (window (get-buffer-window-list buffer nil t))
             (when (>= (window-point window) old)
