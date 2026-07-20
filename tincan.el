@@ -1086,6 +1086,7 @@ this if multi-line replies are not submitted; 0 sends the Return immediately."
 (declare-function vterm-send-string "ext:vterm" (string &optional paste))
 (declare-function vterm-send-return "ext:vterm")
 (declare-function vterm-send-C-c "ext:vterm")
+(declare-function vterm--self-insert "ext:vterm")
 
 (defvar-local tincan--terminal-hint nil
   "Transient hint shown in a new terminal's header line until the first key.")
@@ -1104,6 +1105,16 @@ this if multi-line replies are not submitted; 0 sends the Return immediately."
       (string-trim (buffer-string)))))
 
 ;; ** Terminal minor mode and header
+(defun tincan--guard-c-z (_binding)
+  "Menu-item filter: swallow C-z only when vterm would forward it.
+A forwarded C-z reaches Claude as SIGTSTP, suspending it with no
+job-control shell to resume it (D37).  When the user's config keeps
+C-z for Emacs instead (no `vterm--self-insert' on it), return nil so
+the key falls through to their own binding."
+  (when (and (boundp 'vterm-mode-map)
+             (eq (lookup-key vterm-mode-map (kbd "C-z")) #'vterm--self-insert))
+    #'ignore))
+
 (defvar tincan-terminal-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c SPC") #'tincan-reply)
@@ -1112,7 +1123,7 @@ this if multi-line replies are not submitted; 0 sends the Return immediately."
     (define-key map (kbd "C-c C-c") #'tincan-terminal-interrupt)
     ;; Swallow C-z: vterm would forward it as SIGTSTP, suspending Claude with
     ;; no job-control shell to resume it (D37).
-    (define-key map (kbd "C-z") #'ignore)
+    (define-key map (kbd "C-z") '(menu-item "" ignore :filter tincan--guard-c-z))
     ;; Shift-RET inserts a newline in Claude's prompt without submitting (D44).
     (define-key map (kbd "S-<return>") #'tincan-terminal-send-newline)
     map)
