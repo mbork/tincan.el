@@ -558,6 +558,67 @@ refreshing the mode line refreshes both."
         ((not (string-empty-p line))
          (tincan--set-state 'working))))
 
+;; ** Long-line emphasis guard
+;; markdown-mode's emphasis matchers can be pathologically slow on very long
+;; lines that are not (yet) fenced as code, wedging Emacs inside redisplay
+;; where quitting is inhibited.  When such a line streams in, emphasis
+;; matching is switched off for the buffer; `tincan-refontify' restores it on
+;; demand (D47).
+(defcustom tincan-long-line-threshold 2000
+  "Line length above which streamed output disables emphasis fontification.
+When a line longer than this arrives in the view, Markdown emphasis matching
+\(italic/bold) is suppressed buffer-locally to keep redisplay responsive; see
+`tincan-refontify' (D47).  nil disables the guard."
+  :type '(choice (const :tag "Never suppress" nil) (integer :tag "Characters"))
+  :group 'tincan)
+
+(defvar-local tincan--emphasis-suppressed nil
+  "Non-nil while Markdown emphasis matching is disabled in this buffer (D47).")
+
+(defun tincan--suppress-emphasis (matcher limit)
+  "Call the emphasis MATCHER with LIMIT unless this buffer suppresses it (D47).
+Around advice for `markdown-match-italic' and `markdown-match-bold'; a nil
+return tells font-lock there is no match."
+  (unless tincan--emphasis-suppressed
+    (funcall matcher limit)))
+
+(with-eval-after-load 'markdown-mode
+  (advice-add 'markdown-match-italic :around #'tincan--suppress-emphasis)
+  (advice-add 'markdown-match-bold :around #'tincan--suppress-emphasis))
+
+(defun tincan--guard-long-lines (text)
+  "Suppress emphasis matching when TEXT contains an over-threshold line (D47).
+Called on output about to be inserted, before fontification can see it.
+Only relevant under a Markdown mode - the plain fallback has no emphasis."
+  (when (and tincan-long-line-threshold
+             (not tincan--emphasis-suppressed)
+             (derived-mode-p 'markdown-mode)
+             (string-match (format "[^\n]\\{%d\\}"
+                                   (1+ tincan-long-line-threshold))
+                           text))
+    (setq tincan--emphasis-suppressed t)
+    (force-mode-line-update)
+    (message "tincan: line over %d chars - emphasis fontification off (e to restore)"
+             tincan-long-line-threshold)))
+
+(defun tincan-refontify (&optional force)
+  "Restore emphasis fontification switched off by the long-line guard (D47).
+Once a record is complete its long lines sit inside closed code fences, which
+the emphasis matchers skip cheaply, so re-enabling is safe.  Interactively
+allowed when the agent is not mid-turn (idle or waiting for input); FORCE
+\(\\[universal-argument]) skips that check.  If another over-threshold line
+streams in later, the guard re-arms itself."
+  (interactive "P")
+  (unless tincan--emphasis-suppressed
+    (user-error "tincan: emphasis fontification is already active"))
+  (unless (or force (memq tincan--state '(idle needs-input)))
+    (user-error "tincan: agent still working; C-u %s forces it now"
+                (substitute-command-keys "\\[tincan-refontify]")))
+  (setq tincan--emphasis-suppressed nil)
+  (force-mode-line-update)
+  (font-lock-flush)
+  (message "tincan: emphasis fontification restored"))
+
 (defun tincan--scan-for-state (limit)
   "Scan complete lines from `tincan--scan-marker' up to LIMIT, updating state.
 Only newline-terminated lines are scanned; the marker is left at the start of
@@ -635,7 +696,9 @@ just will not appear if the optional hook is absent or watching is unsupported."
   "Header-line content for a tincan view buffer (identity plus agent state)."
   (concat (propertize " tincan view " 'face 'tincan-header-view)
           (propertize " read-only transcript" 'face 'tincan-header-dim)
-          (tincan--state-string tincan--state)))
+          (tincan--state-string tincan--state)
+          (when tincan--emphasis-suppressed
+            (propertize " [no emphasis]" 'face 'tincan-header-dim))))
 
 (defvar tincan-view-command-map
   (let ((map (make-sparse-keymap)))
@@ -671,6 +734,7 @@ just will not appear if the optional hook is absent or watching is unsupported."
     ;; Reader-style actions.
     (define-key map (kbd "/") #'isearch-forward)
     (define-key map (kbd "c") #'tincan-conversation-only)
+    (define-key map (kbd "e") #'tincan-refontify)
     (define-key map (kbd "r") #'tincan-reply)
     (define-key map (kbd "t") #'tincan-switch-terminal)
     (define-key map (kbd "w") #'tincan-copy-section)
@@ -900,31 +964,63 @@ copy the body of the @@@ section at point (without the marker line)."
         (message "tincan: copied %s (%d chars)" what (length body))))))
 
 ;; ** Watching a session
+(defconst tincan--record-separator "\x1e"
+  "Separator tincan.py appends to each record in --follow mode (D47).
+Must stay in sync with tincan.py's RECORD_SEPARATOR.")
+
+(defvar-local tincan--pending-output ""
+  "Follower output withheld until its record separator arrives (D47).")
+
+(defun tincan--insert-output (proc text)
+  "Insert TEXT at PROC's mark; follow the tail, track state, fold and align."
+  (with-current-buffer (process-buffer proc)
+    ;; Before inserting, so fontification never sees the line unguarded.
+    (tincan--guard-long-lines text)
+    (let* ((mark (process-mark proc))
+           (old (marker-position mark))
+           (inhibit-read-only t))
+      (save-excursion
+        (goto-char mark)
+        (insert text)
+        (set-marker mark (point)))
+      (tincan--scan-for-state mark)
+      (tincan--autofold)
+      (tincan--align-new-tables)
+      ;; Follow the tail in any window that was already at the end.
+      (dolist (window (get-buffer-window-list (current-buffer) nil t))
+        (when (>= (window-point window) old)
+          (set-window-point window (point-max)))))))
+
 (defun tincan--filter (proc chunk)
-  "Insert CHUNK from PROC at its process mark; follow the tail and track state."
+  "Buffer CHUNK from PROC; insert only separator-terminated records (D47).
+Records held back until their separator arrives carry their code fences
+whole, so the Markdown matchers never see a fence's contents unfenced.  The
+trailing fragment waits in `tincan--pending-output'; `tincan--sentinel'
+flushes it if the follower exits."
   (let ((buffer (process-buffer proc)))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (let* ((mark (process-mark proc))
-               (old (marker-position mark))
-               (inhibit-read-only t))
-          (save-excursion
-            (goto-char mark)
-            (insert chunk)
-            (set-marker mark (point)))
-          (tincan--scan-for-state mark)
-          (tincan--autofold)
-          (tincan--align-new-tables)
-          ;; Follow the tail in any window that was already at the end.
-          (dolist (window (get-buffer-window-list buffer nil t))
-            (when (>= (window-point window) old)
-              (set-window-point window (point-max)))))))))
+        ;; Split on the separator; the last part (possibly empty) is the
+        ;; still-arriving remainder, everything before it complete records.
+        (let* ((parts (split-string (concat tincan--pending-output chunk)
+                                    tincan--record-separator))
+               (text (apply #'concat (butlast parts))))
+          (setq tincan--pending-output (car (last parts)))
+          (unless (string-empty-p text)
+            (tincan--insert-output proc text)))))))
 
 (defun tincan--sentinel (proc event)
-  "Report when the tincan follower PROC ends (EVENT)."
+  "Report when the tincan follower PROC ends (EVENT); flush pending output.
+The flush shows an unterminated tail - e.g. an error message from a follower
+that died mid-record - which framing would otherwise hold back forever."
   (let ((buffer (process-buffer proc)))
     (when (and (buffer-live-p buffer) (not (process-live-p proc)))
       (with-current-buffer buffer
+        (unless (string-empty-p tincan--pending-output)
+          (let ((text (string-replace tincan--record-separator ""
+                                      tincan--pending-output)))
+            (setq tincan--pending-output "")
+            (tincan--insert-output proc text)))
         (message "tincan: follower for %s exited (%s)"
                  tincan--session-id (string-trim event))))))
 
@@ -966,6 +1062,9 @@ title (hence the name) can change; BUFFER-NAME names a freshly created one."
                                                (current-local-map)))
           (setq-local tincan--session-id session)
           (setq-local tincan--scan-marker (copy-marker (point-min)))
+          ;; A reused buffer may carry state from a dead follower (D47).
+          (setq-local tincan--pending-output "")
+          (setq-local tincan--emphasis-suppressed nil)
           (tincan--set-state 'working)
           (add-hook 'kill-buffer-hook #'tincan--cleanup nil t)
           ;; --wait so the follower tolerates a just-started session whose

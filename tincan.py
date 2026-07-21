@@ -28,6 +28,14 @@ ROLE_DONE = "@@@ DONE"
 # ** Polling
 POLL_INTERVAL_SECONDS = 0.25
 
+# ** Record framing
+# In --follow mode every rendered record is terminated with an ASCII record
+# separator, so the Emacs filter can buffer partial pipe chunks and insert
+# whole records only - a code fence then always arrives together with its
+# closing fence (D47).
+RECORD_SEPARATOR = "\x1e"
+frame_records = False
+
 # * Output helpers
 def emit(text):
     # Append-only writes to stdout, flushed so a downstream reader sees them.
@@ -303,6 +311,9 @@ def render_record(record):
 def emit_record(record):
     text = render_record(record)
     if text:
+        if frame_records:
+            # Strip stray separators from content so the framing stays sound.
+            text = text.replace(RECORD_SEPARATOR, "") + RECORD_SEPARATOR
         emit(text)
 
 # * Line handling
@@ -620,6 +631,8 @@ def main():
         parser.error("a session id is required (or use --show-sessions)")
     path = resolve_session_file(args.session, wait=args.wait and args.follow)
     if args.follow:
+        global frame_records
+        frame_records = True
         follow_transcript(path)
     else:
         print_transcript(path)

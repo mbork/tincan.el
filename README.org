@@ -75,6 +75,8 @@ Keys - view:
 - =TAB= - fold the section at point (from its heading or its body); =S-TAB= -
   whole buffer
 - =c= - hide all sections except USER / ASSISTANT (toggle; navigation skips them)
+- =e= - restore emphasis fontification after the long-line guard disabled it
+  (header shows =[no emphasis]=; =C-u e= forces mid-turn)
 - =/= - search (=isearch-forward=); =w= - copy the section (or code block) at point
 - =RET= - visit the file at point; =?= - describe the mode
 
@@ -99,6 +101,8 @@ Options:
   raise if replies do not submit)
 - =tincan-terminal-scroll-margin= - bottom margin so prompts stay on-screen (default =8=)
 - =tincan-buffer-title-width= - title width in buffer names (default =16=)
+- =tincan-long-line-threshold= - line length that switches off emphasis
+  fontification in the view (default =2000=; =nil= disables the guard)
 
 Requirements and notes:
 - vterm needed for the terminal (without it: read-only =tincan-view= only)

@@ -714,3 +714,40 @@ that exclusion is accurate on freshly streamed, not-yet-fontified text.  Runs fr
 the filter after `tincan--autofold'; `tincan-align-tables' is a manual whole-buffer
 re-run (which works even when `tincan-format-tables' is nil, since it is an
 explicit request).
+
+### D47 - Record framing plus a long-line emphasis guard
+A 37k-character line in a tool result (JSON nested inside a JSON string) wedged
+Emacs at 100% CPU inside `markdown-match-italic', under `redisplay_internal'
+where quitting is inhibited.  The complete line is harmless - it sits in a
+closed code fence, which the emphasis matchers skip - but pipe chunking used to
+let `tincan--filter' insert a fence's contents before its closing fence
+arrived, exposing the raw text to the emphasis regexps, whose backtracking is
+superlinear in line length.  Two layers fix this without modifying content
+(wrapping/truncating long lines was rejected: it breaks copy fidelity, can
+fabricate line-start syntax - including phantom `@@@' markers - and corrupts
+tables).
+Layer one: framing.  tincan.py terminates each rendered record with an ASCII
+record separator (0x1E) in --follow mode only (plain output stays clean for
+other consumers), stripping stray 0x1E from bodies so framing stays sound.  The
+filter buffers chunks in `tincan--pending-output' and inserts only up to the
+last separator, so fences always arrive closed; a pipe is a boundary-less byte
+stream, hence an explicit separator rather than parsing fence balance in elisp
+(which would duplicate markdown's fence grammar) or timing heuristics.  The
+sentinel flushes an unterminated tail (e.g. a follower error) that framing
+would otherwise withhold forever.  Records are whole JSONL lines, so framing
+adds no perceptible latency.
+Layer two: the guard, for long lines that are legitimately unfenced (prose, or
+a transcript whose own text carries unbalanced backticks).  Before insertion
+the filter checks the record for a line over `tincan-long-line-threshold'
+(default 2000; nil disables) and sets buffer-local
+`tincan--emphasis-suppressed', consulted by :around advice on
+`markdown-match-italic' / `markdown-match-bold' (advice rather than
+`font-lock-keywords' surgery: it survives keyword compilation, and restoring is
+just clearing the flag).  The check runs before insertion so fontification
+never sees the line unguarded.  The header line shows `[no emphasis]';
+`tincan-refontify' (`e') clears the flag and `font-lock-flush'es - gated on the
+agent not being mid-turn since a complete transcript's long lines are all
+fenced, `C-u' forces - and the guard simply re-arms if a later record brings
+another long line.  Lowering `long-line-threshold' instead was tested and does
+not help: the blowup starts below any reasonable threshold, while the wedge is
+a single uninterruptible fontification call.
