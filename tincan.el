@@ -1342,15 +1342,37 @@ Works from a view or a terminal buffer; either element may be nil."
   (cdr (tincan--resolve-target)))
 
 ;; ** Starting, resuming, attaching
+(require 'project)
+
 (defun tincan--require-vterm ()
   "Signal a `user-error' unless vterm is available."
   (unless (tincan--vterm-available-p)
     (user-error "tincan: vterm is required to run the terminal (see D26)")))
 
+(defun tincan--project-root ()
+  "Return the root of the project around `default-directory', or nil if none.
+Detection is `project-current''s, so whatever backends and markers the user has
+configured apply (a plain .git checkout works out of the box)."
+  (let ((project (project-current)))
+    (and project (project-root project))))
+
+(defun tincan--confirm-project-root ()
+  "Confirm before starting a session outside a project root; error if declined.
+The launch directory is what Claude sees and what tincan matches sessions by
+(D40), so a subdirectory - or a directory in no project at all - is usually a
+mistake worth catching before Claude starts (D48)."
+  (let ((root (tincan--project-root)))
+    (unless (and root (file-equal-p root default-directory))
+      (unless (y-or-n-p (format "%s is not a project root; start Claude here anyway? "
+                                (abbreviate-file-name default-directory)))
+        (user-error "tincan: start cancelled")))))
+
 (defun tincan--start-new ()
   "Start a NEW Claude session in `default-directory'; return the view (D40).
+Asks for confirmation when that is not a project root (D48).
 Shows the terminal; the view follows it in the background."
   (tincan--require-vterm)
+  (tincan--confirm-project-root)
   (let* ((id (tincan--new-session-id))
          (dir default-directory)
          (command (format "%s --session-id %s" tincan-claude-command id))
@@ -1384,6 +1406,7 @@ Shows the view and leaves the terminal buried."
 ;;;###autoload
 (defun tincan-start ()
   "Start a NEW Claude session in `default-directory' (D40).
+Asks for confirmation when `default-directory' is not a project root (D48).
 The prefix arg is ignored; to resume use `tincan-resume', and for the smart
 default use `tincan' (`tincan-dwim')."
   (interactive)
@@ -1426,7 +1449,8 @@ A terminal belongs when its launch directory is an ancestor-or-equal of
 (defun tincan-dwim ()
   "Resume or start a Claude session for the current project, whichever fits (D40).
 In order: if a live session for this project is already open, switch to it; else
-resume the project's most recent session; else start a new one."
+resume the project's most recent session; else start a new one - and that last
+step confirms first when `default-directory' is not a project root (D48)."
   (interactive)
   (let ((terminal (tincan--project-terminal)))
     (if terminal

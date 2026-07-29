@@ -751,3 +751,30 @@ fenced, `C-u' forces - and the guard simply re-arms if a later record brings
 another long line.  Lowering `long-line-threshold' instead was tested and does
 not help: the blowup starts below any reasonable threshold, while the wedge is
 a single uninterruptible fontification call.
+
+### D48 - Confirm a new session started outside a project root
+`tincan--start-new' now asks `%s is not a project root; start Claude here
+anyway?' unless `default-directory' is a project root, and aborts with a
+`user-error' on a "no".  This reaches both entry points that create a session:
+`tincan-start' and `tincan-dwim''s third branch (resume paths are unaffected -
+they relaunch in the session's own recorded `cwd' per D40, which was vetted when
+that session was created).
+The launch directory is load-bearing, which is why the mistake is worth a
+keystroke: Claude indexes and searches from its cwd, and tincan derives session
+identity from it - tincan.py lists sessions by the closest launch directory at or
+above the working directory (D11), and DWIM's live-group match is
+ancestor-or-equal on `tincan--cwd' (D40).  Starting one directory too deep gives
+Claude a partial view of the tree and hides that session from the picker you use
+at the root, and neither symptom points back at the cause.
+Rootness is `project-current' / `project-root', not a hand-rolled `.git' probe:
+the VC backend already covers plain checkouts with no configuration, and
+deferring to project.el means `project-vc-extra-root-markers' (monorepo
+packages, `.project' files) and `project-vc-merge-submodules' keep working as
+the user configured them.  Comparison is `file-equal-p', so symlinks and
+unnormalized paths do not produce a spurious prompt.
+A directory in no project at all prompts too, rather than passing silently.  The
+rule is then one sentence with no exception to remember, and the ad-hoc case
+(`~', a scratch dir) is exactly where a mistyped or forgotten `cd' lands - the
+reading where "not a root" excuses itself is the one where the check would have
+helped most.  No defcustom to disable it: `y-or-n-p' is one keystroke, and a knob
+would need its own documentation and a decision here for no real gain.

@@ -47,7 +47,9 @@ Commands:
 - =M-x tincan= (=tincan-dwim=) - front door, current project: switch to a live
   session if one is open, else resume the most recent, else start a new one
 - =M-x tincan-start= - always a NEW session in =default-directory=: generates an
-  id, runs =claude --session-id <id>=, shows the terminal, view follows behind
+  id, runs =claude --session-id <id>=, shows the terminal, view follows behind.
+  Outside a project root (=project-current=), confirmation first - usually a
+  stale =cd=.  Same prompt on =tincan='s start-a-new branch
 - =M-x tincan-resume= - resume an existing session, picked from a list; relaunches
   =claude --resume <id>= in the session's own recorded directory; shows the view,
   terminal buried.  The prefix widens the list in notches (each =C-u= shows more):
