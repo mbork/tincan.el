@@ -5,6 +5,7 @@
 
 # * Imports
 import argparse
+import difflib
 import json
 import os
 import shlex
@@ -171,6 +172,19 @@ def lang_for_path(path):
         return ""
     return EXT_TO_LANG.get(Path(path).suffix.lower(), "")
 
+def marker_text(value, default=""):
+    # A model-written JSON field rendered onto a marker line, or DEFAULT when it
+    # is not a plain single-line string.  Nothing guarantees a tool_use field's
+    # type or content: a number raises on concatenation, a list is not even
+    # hashable for a dict lookup, and an embedded newline forges a second line -
+    # one beginning with "@@@" would fake a section marker and split the block in
+    # the view.  This matters more than a malformed record deserves, because
+    # `handle_line' guards only against JSON errors (D10): an exception raised
+    # while rendering escapes it and kills the follower mid-session.
+    if not isinstance(value, str) or "\n" in value:
+        return default
+    return value
+
 # Tools whose input is dominated by file content: render that content as a code
 # block (in the file's language) instead of escaped JSON.  Maps tool name to the
 # input fields holding the path and the content.
@@ -178,20 +192,80 @@ CONTENT_TOOLS = {
     "Write": ("file_path", "content"),
 }
 
+# "Edit" replaces one snippet of a file with another; the two snippets read far
+# better as a unified diff than as escaped JSON strings, and a ```diff fence lets
+# the Emacs side fontify them with `diff-mode' (D49).
+def edit_diff(old_text, new_text):
+    # Unified diff between an Edit's OLD_TEXT and NEW_TEXT as a list of lines,
+    # empty when the two are equal.  Splitting on "\n" rather than with
+    # str.splitlines() is a fidelity requirement, not a preference: splitlines()
+    # also breaks on \v, \f, \x1c-\x1e, \x85, U+2028 and U+2029, and since the
+    # body is rejoined with "\n" every one of those would be silently rewritten
+    # into a real newline.  A form feed is an idiomatic page separator in Emacs
+    # Lisp, and \x1e is tincan's own record separator (D47), so this is content
+    # this project actually edits.  Splitting on "\n" is lossless, and its
+    # trailing empty field additionally keeps a final newline visible, so an
+    # edit that only adds or drops one still shows a difference.  The
+    # "---"/"+++" pair difflib always leads with is dropped: the path is on the
+    # marker line already, and without a file header diff-mode will not try to
+    # refine the hunks against the file's current contents, which need not match
+    # what the transcript recorded.
+    old_lines = old_text.split("\n")
+    new_lines = new_text.split("\n")
+    # Context wide enough to span the longer side, so every line of both snippets
+    # survives into the diff.  A normal diff elides context because it is still
+    # on disk; these two snippets exist nowhere but this record, so eliding here
+    # would delete them from the transcript (D49).  One hunk always results.
+    context = max(len(old_lines), len(new_lines))
+    lines = list(difflib.unified_diff(old_lines, new_lines, n=context, lineterm=""))
+    return lines[2:]
+
+def render_edit(tool_input, timestamp):
+    # None when TOOL_INPUT is not a renderable Edit - malformed, or a no-op whose
+    # diff would be empty - so the caller can fall back to the JSON rendering
+    # rather than drop the block.
+    old_text = tool_input.get("old_string")
+    new_text = tool_input.get("new_string")
+    if not isinstance(old_text, str) or not isinstance(new_text, str):
+        return None
+    lines = edit_diff(old_text, new_text)
+    if not lines:
+        return None
+    path = marker_text(tool_input.get("file_path"))
+    header = ROLE_TOOL_USE + " Edit"
+    if path:
+        header += " " + path
+    if tool_input.get("replace_all"):
+        # The one Edit input a diff of the two snippets cannot show, since it is
+        # about the matches elsewhere in the file.
+        header += " (replace_all)"
+    return format_block(header, "\n".join(lines), lang="diff", timestamp=timestamp)
+
 def render_tool_use(block, timestamp):
-    name = block.get("name", "?")
+    # Sanitize the name before it is used, since it both lands on the marker line
+    # and keys a dict lookup that an unhashable value would break.
+    name = marker_text(block.get("name"), "?")
     tool_input = block.get("input")
+    if name == "Edit" and isinstance(tool_input, dict):
+        rendered = render_edit(tool_input, timestamp)
+        if rendered:
+            return rendered
     spec = CONTENT_TOOLS.get(name)
     if spec and isinstance(tool_input, dict):
-        # Render the file content as a fenced code block, with the path on the
-        # marker line and the language taken from the file extension.
         path_field, content_field = spec
-        path = tool_input.get(path_field) or ""
-        content = tool_input.get(content_field, "")
-        header = ROLE_TOOL_USE + " " + name
-        if path:
-            header += " " + path
-        return format_block(header, content, lang=lang_for_path(path), timestamp=timestamp)
+        content = tool_input.get(content_field)
+        # A non-string content is a malformed record: fall through to JSON, which
+        # renders it losslessly, rather than raise inside `format_block'.  Same
+        # fallback a malformed Edit takes, so no block is ever lost to one.
+        if isinstance(content, str):
+            # Render the file content as a fenced code block, with the path on
+            # the marker line and the language taken from the file extension.
+            path = marker_text(tool_input.get(path_field))
+            header = ROLE_TOOL_USE + " " + name
+            if path:
+                header += " " + path
+            return format_block(header, content, lang=lang_for_path(path),
+                                timestamp=timestamp)
     # Default: pretty-print the input as JSON.
     if tool_input is None:
         body = ""

@@ -535,7 +535,10 @@ ignore trailing text).  The fence length still follows the CommonMark rule (D18)
 so file content containing backticks widens the fence.
 Not handled: `Edit'/`MultiEdit' carry two payloads (old/new string), so they do
 not fit the single-content map and still render as JSON; a two-block renderer
-could be added later.
+could be added later.  (`Edit' since got one - a diff rather than two blocks;
+see D49.  `MultiEdit' still renders as JSON.)
+This renderer's path and content fields were later type-guarded along with the
+Edit path's; see `marker_text' under D49.
 
 ### D40 - Session entry commands: start / resume / view / attach / dwim
 The reply path got a clear front door and single-purpose verb commands, replacing
@@ -778,3 +781,94 @@ rule is then one sentence with no exception to remember, and the ad-hoc case
 reading where "not a root" excuses itself is the one where the check would have
 helped most.  No defcustom to disable it: `y-or-n-p' is one keystroke, and a knob
 would need its own documentation and a decision here for no real gain.
+
+### D49 - Render an `Edit` tool use as a unified diff (extends D39)
+An `Edit' tool_use is rendered as a unified diff of its `old_string' against its
+`new_string', fenced as ```diff, with the file path on the `@@@ TOOL_USE' marker
+line exactly as D39 does for `Write'.  This lifts D39's "not handled" note: the
+two payloads do fit a single block once they are diffed.
+Rationale: the JSON rendering printed the same snippet twice, escaped, as one
+`\n'-laden line per field, so the reader had to find the difference by eye across
+two walls of text - the change itself, the only thing the block is about, was
+never actually shown.  A diff marks it directly, which matters because Claude's
+`old_string' routinely carries a long unchanged prefix or suffix just to anchor
+the match.  The ```diff fence then buys
+`diff-mode' fontification of the body for free through native code-block
+fontification (D17), so additions, removals and hunk headers are colored with no
+new faces and no new keywords on the Emacs side.
+No `---'/`+++' file header is emitted.  The path is already on the marker line
+(D39), and without a header `diff-mode' will not try to refine the hunks against
+the file's *current* contents, which need not resemble what the transcript
+recorded.  The hunk headers' line numbers are relative to the snippet, because a
+tool_use records the old and new strings but not their offset in the file; the
+diff therefore reads but does not apply, and `w' on the block copies a diff, not
+a patch.
+Lines are split on `\n' rather than with `str.splitlines()'.  This is a fidelity
+requirement, not a stylistic preference: `splitlines()' also breaks on `\v',
+`\f', `\x1c'-`\x1e', `\x85', U+2028 and U+2029, and because the body is rejoined
+with `\n', every one of those characters would be silently rewritten into a real
+newline in the rendered block - content corruption, in a viewer whose whole pitch
+is a faithful transcript.  It is not hypothetical here: a form feed is the
+idiomatic page separator in Emacs Lisp, and `\x1e' is tincan's own record
+separator (D47), so both are characters this project edits in its own sources.
+`split("\n")' is lossless (a bijection with the string), and its trailing empty
+field additionally keeps a final newline visible, so an edit that only adds or
+removes one still shows a difference instead of rendering as two identical texts.
+The cost of that last property: when exactly one side ends in a newline the diff
+shows a blank line being added or removed that is not really there.  Measured at
+3 of 1141 real Edit blocks (0.3%), so it is not worth the `\ No newline at end of
+file' machinery that would suppress it.
+Malformed input (a missing `old_string'/`new_string') and the degenerate no-op
+edit, whose diff is empty, fall back to the D7/D18 JSON rendering, so a block is
+never silently swallowed by `format_block''s empty-body rule.  A `Write' whose
+`content' is not a string falls back the same way, for the same reason.
+That fallback discipline is backed by `marker_text', which every value destined
+for a marker line now passes through - the tool name and, in both renderers, the
+file path.  A tool_use's fields are model-written JSON, so nothing guarantees
+their type or content, and three distinct shapes were reachable: a number raises
+on concatenation, a list is not hashable and breaks the `CONTENT_TOOLS' lookup,
+and an embedded newline forges a second line - one starting with `@@@' would fake
+a section marker and split the block in the view.  The stakes are set by D10:
+`handle_line' guards only against JSON errors, so anything raised while rendering
+escapes it and takes down the follower mid-session, turning a malformed record
+into a dead live view.  `marker_text' returns a substitute (`""' for a path, `?'
+for a name) instead, so a bad record degrades to a slightly bare marker line.
+Verified by exhaustively rendering every JSON-representable shape in each slot -
+51840 inputs, no exceptions raised.
+Note what this does *not* cover: a body rendered verbatim (a `Write''s content, a
+tool result, message prose) can still contain a line beginning with `@@@' and
+forge a marker, which the same sweep confirms.  That is inherent to D6's marker
+choice - it buys reliable font-locking on the premise that `@@@' is rare at line
+start - and escaping bodies to close it was already rejected under D47 as a
+copy-fidelity loss.  The guard covers the marker line, which tincan composes and
+therefore controls, not the body, which it must reproduce faithfully.
+The marker, outline and state regexes are unaffected (D14, D22): no diff line can
+begin with `@@@' - context, added and removed lines all carry a one-character
+prefix, and a hunk header has exactly two `@' before its space.
+
+Context is `max(len(old_lines), len(new_lines))', not difflib's default 3, so the
+diff is a pure presentation layer over the excerpt rather than a lossy summary of
+it - nothing is ever collapsed, and there is always exactly one hunk.  The
+distinction matters because `n' means something different here than in an
+ordinary diff.  Normally the two sides are whole files and dropped context costs
+nothing, because the reader can open the file; here the two sides are the excerpt
+Claude chose to send, which exists nowhere in the transcript but this record, so
+collapsing a run of unchanged lines does not elide it, it deletes it - directly
+against the "faithful history" claim the viewer is built on.
+Measured over 1141 real Edit blocks: at `n=3', 72 blocks (6.3%) lost at least one
+excerpt line, 301 lines in total, the worst hiding 22 lines of a 39-line excerpt
+whose changes sat at both ends.  Full context costs 528 extra rendered lines
+across those 1141 blocks - 0.46 lines per block - which is nothing next to a
+6.3% hole in the record, especially since the sections start folded (D22) so
+block length is barely felt.  `n=20' would also have reached zero on this corpus,
+but only by accident of the largest excerpt seen so far; deriving `n' from the
+input needs no such luck.
+The residual cost is the reverse case: a very large Edit renders in full instead
+of as a tight summary.  Only one Edit in the corpus has a 200+ line side, and
+`diff-mode' colors the changed lines anyway, so the change stays findable.  That
+one block is also the only one anywhere near difflib's `autojunk' heuristic,
+which (for `len(new_lines) >= 200') drops lines occurring more than
+`len(new_lines) // 100 + 1' times from the match index and would fragment the
+hunk; `unified_diff' exposes no way to disable it, so if large edits ever become
+common the fix is to build hunks from `SequenceMatcher(..., autojunk=False)'
+directly.  Not worth doing for one block.

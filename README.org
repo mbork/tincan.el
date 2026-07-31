@@ -200,6 +200,11 @@ Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
 =TOOL_USE=, =TOOL_RESULT=, and =DONE=) are font-locked and the buffer is
 read-only.
 
+Two tool calls get a shape of their own instead of raw JSON, path on the marker
+line: =Write= - file content, language from the extension; =Edit= - unified diff
+of the replaced snippet, fontified by =diff-mode=.  Line numbers relative to the
+snippet, so readable but not appliable.
+
 The sections are foldable: =TAB= cycles a section's visibility - on its =@@@=
 heading or from anywhere inside its body - and =S-TAB= cycles the whole buffer.
 Every section except =USER= and
