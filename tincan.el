@@ -785,11 +785,14 @@ any incomplete trailing line so a later chunk completes it."
   "Return Claude Code's config directory (honoring CLAUDE_CONFIG_DIR)."
   (expand-file-name (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude")))
 
+(defun tincan--state-directory ()
+  "Return tincan's per-session state directory (notify files, drafts)."
+  (expand-file-name "tincan" (tincan--config-dir)))
+
 (defun tincan--notify-file (session-id)
   "Return the notify status file the hook writes for SESSION-ID.
 Mirrors tincan.py's notify_status_path."
-  (expand-file-name (concat session-id ".notify")
-                    (expand-file-name "tincan" (tincan--config-dir))))
+  (expand-file-name (concat session-id ".notify") (tincan--state-directory)))
 
 (defun tincan--setup-notify-watch (session-id)
   "Watch SESSION-ID's notify file and flag `needs-input' on change.
@@ -1695,8 +1698,11 @@ is never blocked - the \"still working, send anyway?\" check happens at send tim
 Nothing is sent or discarded; bring the draft back with `tincan-reply'
 \(\\[tincan-reply]) in the view, which reopens this same compose buffer.
 Uses `quit-window', so a popped-up compose window is deleted; if it cannot be
-\(e.g. the sole window) the previous buffer is restored."
+\(e.g. the sole window) the previous buffer is restored.
+The draft is also flushed to disk (D51): a hidden draft is the one most easily
+forgotten, and it should not depend on the auto-save cadence."
   (interactive)
+  (tincan--compose-save-draft)
   (quit-window))
 
 (defun tincan--compose-buffer-for (terminal)
@@ -1706,6 +1712,88 @@ Keyed on the terminal so concurrent sessions keep separate drafts."
               (and (buffer-local-value 'tincan-compose-minor-mode buffer)
                    (eq (buffer-local-value 'tincan--terminal buffer) terminal)))
             (buffer-list)))
+
+;; ** Draft persistence
+;; A compose buffer visits no file, so an Emacs exit used to take an unsent
+;; draft with it - `kill-emacs' asks about modified *file* buffers only (D51).
+;; Each session's draft is persisted next to its notify file, as
+;; <config-dir>/tincan/<session-id>.draft: Emacs' own auto-save writes it while
+;; you type (that is all `buffer-auto-save-file-name' means for a non-file
+;; buffer), `kill-emacs-hook' flushes what auto-save has not caught yet, and the
+;; next `tincan-reply' for that session reads it back into the fresh compose
+;; buffer.  Killing compose - a send, or a confirmed discard - deletes the file.
+
+(defcustom tincan-persist-drafts t
+  "Whether an unsent compose draft survives killing Emacs (D51).
+When non-nil, a draft is written to <config-dir>/tincan/<session-id>.draft and
+restored the next time you reply to that session.  Drafts are per session id, so
+a session that is never resumed keeps its file until it is removed by hand."
+  :type 'boolean
+  :group 'tincan)
+
+(defvar-local tincan--draft-path nil
+  "For a compose buffer, the file its draft is persisted to, or nil.")
+
+(defun tincan--draft-file (session-id)
+  "Return the draft file for SESSION-ID, or nil when there is no id.
+A compose buffer whose terminal is already gone has nowhere to key a draft, so
+it simply is not persisted."
+  (and session-id
+       (expand-file-name (concat session-id ".draft") (tincan--state-directory))))
+
+(defun tincan--compose-save-draft ()
+  "Persist this compose buffer's draft; an empty draft deletes the file instead.
+Failures are non-fatal: losing the copy on disk must never break composing, and
+this also runs from `kill-emacs-hook', where an error would block the exit."
+  (when tincan--draft-path
+    (condition-case nil
+        (if (string-empty-p (string-trim (buffer-string)))
+            (tincan--compose-discard-draft)
+          (make-directory (file-name-directory tincan--draft-path) t)
+          (write-region nil nil tincan--draft-path nil 'no-message))
+      (error nil))))
+
+(defun tincan--compose-discard-draft ()
+  "Delete this compose buffer's persisted draft, if any.
+Runs from `kill-buffer-hook', so it covers both a send and a confirmed discard."
+  (when (and tincan--draft-path (file-exists-p tincan--draft-path))
+    (ignore-errors (delete-file tincan--draft-path))))
+
+(defun tincan--compose-restore-draft ()
+  "Insert this compose buffer's persisted draft; return non-nil if there was one.
+Point ends up after the draft, and the buffer is left unmodified so auto-save
+rewrites the file only once it is actually edited."
+  (let ((file tincan--draft-path))
+    (when (and file (file-readable-p file))
+      (ignore-errors (insert-file-contents file))
+      (goto-char (point-max))
+      (set-buffer-modified-p nil)
+      (> (buffer-size) 0))))
+
+(defun tincan--compose-setup-draft (terminal)
+  "Arm draft persistence in this compose buffer for TERMINAL's session (D51).
+Return non-nil when a draft left behind by an earlier Emacs was restored."
+  (setq-local tincan--draft-path
+              (tincan--draft-file
+               (and (buffer-live-p terminal)
+                    (buffer-local-value 'tincan--session-id terminal))))
+  (when tincan--draft-path
+    ;; Auto-save writes the file but will not create its directory, and the
+    ;; notify watch (D20) may not have created it either.
+    (ignore-errors (make-directory (file-name-directory tincan--draft-path) t))
+    ;; For a non-file buffer this *is* auto-save mode: `auto-save-mode' does
+    ;; nothing but set this variable, and it would insist on a #name# of its own.
+    (setq-local buffer-auto-save-file-name tincan--draft-path)
+    (add-hook 'kill-buffer-hook #'tincan--compose-discard-draft nil t)
+    (add-hook 'kill-emacs-hook #'tincan--save-all-drafts)
+    (tincan--compose-restore-draft)))
+
+(defun tincan--save-all-drafts ()
+  "Persist every live compose buffer's draft (`kill-emacs-hook', D51)."
+  (dolist (buffer (buffer-list))
+    (when (buffer-local-value 'tincan--draft-path buffer)
+      (with-current-buffer buffer
+        (tincan--compose-save-draft)))))
 
 (defvar tincan--compose-force-kill nil
   "When non-nil, skip the non-empty-draft confirmation when killing compose.")
@@ -1721,24 +1809,30 @@ Bypassed by `tincan--compose-force-kill' (a successful send is not a discard)."
 (defun tincan--open-compose (view terminal)
   "Pop a compose buffer targeting the VIEW/TERMINAL session group.
 Reuse this session's existing compose buffer (keeping any in-progress draft)
-rather than spawning a duplicate."
-  (let ((buffer (or (tincan--compose-buffer-for terminal)
-                    (with-current-buffer
-                        (generate-new-buffer
-                         (tincan--compose-buffer-name view terminal))
-                      (funcall (tincan--compose-major-mode))
-                      (visual-line-mode 1)
-                      ;; A single space after .?! ends a sentence (M-a/M-e).
-                      (setq-local sentence-end-double-space nil)
-                      (setq-local tincan--view view)
-                      (setq-local tincan--terminal terminal)
-                      (setq-local header-line-format
-                                  '((:eval (tincan--compose-header))))
-                      (tincan-compose-minor-mode 1)
-                      (add-hook 'kill-buffer-query-functions
-                                #'tincan--compose-kill-query nil t)
-                      (current-buffer)))))
+rather than spawning a duplicate; a fresh one picks up a draft left on disk by
+an earlier Emacs (D51)."
+  (let* ((restored nil)
+         (buffer (or (tincan--compose-buffer-for terminal)
+                     (with-current-buffer
+                         (generate-new-buffer
+                          (tincan--compose-buffer-name view terminal))
+                       (funcall (tincan--compose-major-mode))
+                       (visual-line-mode 1)
+                       ;; A single space after .?! ends a sentence (M-a/M-e).
+                       (setq-local sentence-end-double-space nil)
+                       (setq-local tincan--view view)
+                       (setq-local tincan--terminal terminal)
+                       (setq-local header-line-format
+                                   '((:eval (tincan--compose-header))))
+                       (tincan-compose-minor-mode 1)
+                       (add-hook 'kill-buffer-query-functions
+                                 #'tincan--compose-kill-query nil t)
+                       (when tincan-persist-drafts
+                         (setq restored (tincan--compose-setup-draft terminal)))
+                       (current-buffer)))))
     (pop-to-buffer buffer)
+    (when restored
+      (message "tincan: draft restored"))
     buffer))
 
 (defun tincan-compose-send ()

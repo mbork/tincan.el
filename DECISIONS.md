@@ -939,3 +939,49 @@ removed, or with counts that disagree with the body, `diff-mode' finds no hunk
 and marks nothing.  difflib always emits correct counts, so the requirement is
 met, but dropping the header to hide its snippet-relative line numbers would
 now silently cost word-level highlighting too.
+
+### D51 - An unsent compose draft survives killing Emacs
+Compose (D34) is a plain buffer visiting no file, which made it the one place in
+tincan where work could vanish without a word: `save-buffers-kill-emacs' asks
+about modified *file* buffers, so exiting with a half-written reply in compose -
+especially one hidden with `C-c C-z' (D41) - took it along silently.  The kill
+guard added in D34 does not fire either; `kill-buffer-query-functions' is not
+consulted when Emacs exits.
+So the draft is persisted per session, as `<config-dir>/tincan/<session-id>.draft'
+- the directory the notify files already live in (D20), keyed the same way, so
+one session's drafts never reach another's.  A session id is required: a compose
+buffer whose terminal has died has nothing to key on and is simply not
+persisted, which is also why `tincan--draft-file' returns nil rather than
+inventing a name.  The extra writes are invisible to the rest of the system:
+tincan.py only ever names `<id>.notify' directly, and the D20 watcher filters
+events by exact basename, so `.draft' traffic in that directory cannot be
+mistaken for a `needs-input' signal.
+Writing it is Emacs' own auto-save rather than a timer of tincan's.  Setting
+`buffer-auto-save-file-name' in a non-file buffer *is* what enabling auto-save
+means (the minor mode does nothing else, and would insist on a `#name#' of its
+own), so the draft gets written on whatever cadence the user has configured, and
+`do-auto-save' is code that has been debugged since the 1980s.  Two explicit
+flushes cover what auto-save's cadence can miss: `kill-emacs-hook' (a normal
+exit does not auto-save - only the crash path in `shut_down_emacs' does), and
+`tincan-compose-hide', because a hidden draft is precisely the one that gets
+forgotten.  Both go through `tincan--compose-save-draft', which is wrapped in
+`condition-case': a failed draft write must never break composing, and on
+`kill-emacs-hook' an error would block the exit itself.
+Restoring is deliberately not `recover-file'-style archaeology.  A fresh compose
+buffer for a session with a draft on disk reads it back, leaves point after it,
+and says "draft restored"; the buffer is marked unmodified so auto-save does not
+immediately rewrite an identical file.  Nothing changes for a live session: the
+D41 reuse path (`tincan--compose-buffer-for') finds the existing buffer first,
+so the file is only ever read when the buffer is gone - i.e. after an Emacs
+restart.
+Deleting it is `kill-buffer-hook', which covers both endings at once: a send
+force-kills compose (D34), and a discard has already been confirmed by the D34
+query.  Emacs would delete an auto-save file on kill anyway, but relying on that
+would tie a user-visible guarantee to internal `kill-buffer' conditions.  An
+empty or whitespace-only draft deletes the file instead of writing one, so
+clearing compose and exiting leaves nothing to restore.
+`tincan-persist-drafts' (default t) turns the whole thing off, in which case no
+draft file is ever created.  Known and accepted: a draft for a session that is
+never resumed keeps its file until removed by hand.  Pruning would need a policy
+(age?  dead session?) and the files are tiny; a stale one costs nothing until the
+day that session is resumed, when it is arguably what you wanted.

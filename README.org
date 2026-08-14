@@ -93,6 +93,7 @@ Compose buffer:
   Claude is still working
 - =C-c C-k= - cancel (confirms before discarding a non-empty draft)
 - =C-c C-z= - hide the compose buffer, keeping the draft; reply again to restore it
+- unsent draft kept across Emacs exits; restored on the next reply to that session
 
 Options:
 - =tincan-claude-command= - the program (default =claude=)
@@ -105,6 +106,8 @@ Options:
 - =tincan-buffer-title-width= - title width in buffer names (default =16=)
 - =tincan-long-line-threshold= - line length that switches off emphasis
   fontification in the view (default =2000=; =nil= disables the guard)
+- =tincan-persist-drafts= - unsent drafts survive Emacs exits, in
+  =~/.claude/tincan/<session-id>.draft= (default =t=)
 
 Requirements and notes:
 - vterm needed for the terminal (without it: read-only =tincan-view= only)
