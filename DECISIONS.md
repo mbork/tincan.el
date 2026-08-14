@@ -482,7 +482,8 @@ in the background; kill + restart as an escape hatch) until the first turn lands
 Entry commands (`tincan-view', `tincan-start', `tincan-attach') are M-x only;
 tincan binds no global keys (bind them yourself if wanted).  In-session keys live
 in buffer-local maps.  View and terminal share `C-c SPC' (reply), `C-c o' (go to
-the sibling buffer), and `C-c k' (close the session).  The view adds `C-c 0'
+the sibling buffer - in the current window, or with `C-u' a separate one; see
+D53), and `C-c k' (close the session).  The view adds `C-c 0'
 (dismiss the terminal window) and, since it is read-only, single-key viewer
 commands: `SPC'/`DEL' (page), `<'/`>' (ends), and three navigation tiers from
 finest to coarsest - `n'/`p'/`u' the outline family (org/outline speed-key
@@ -1027,3 +1028,31 @@ is where toggling `c' on puts it anyway.
 `tincan-conversation-only' now sets `tincan--conversation-only' before hiding or
 revealing rather than after, since the shared pass tests that flag to decide
 whether it should do anything.
+
+### D53 - `C-c o' switches in the current window (extends D37)
+Going to the sibling buffer used to be `(select-window (display-buffer
+buffer))', which never reuses the current window: from a single-window frame a
+navigation key split the frame, so "put me over there" also rearranged the
+layout, and undoing that cost a `C-x 1'.
+`C-c o' (and the view's `t') now reuse a window
+already showing the sibling if there is one, and otherwise display it in the
+selected window; they never split on their own.  `C-u' forces a separate window
+- again reusing one that already shows the buffer, splitting only when there is
+none - which is roughly what the key did before.
+Reuse comes first deliberately, rather than always taking over the current
+window.  Both buffers are frequently on screen at once: that is the normal
+side-by-side setup, and it is what `tincan-show-terminal-on-send' leaves behind
+after every reply (D35).  Taking over the current window there would show the
+sibling twice and push the buffer you were reading off the frame entirely - and
+the D35 peek makes it concrete, since that one-shot dismiss hook exempts
+`tincan-switch-terminal' precisely so you can walk into the window it popped up.
+With reuse first, that walk lands in the peeked window as before.  The cost is
+that when both are already visible, `C-c o' moves point to the other window
+instead of swapping buffers in this one; taking over a window that is already
+showing what you want is the rarer wish, and `C-u' is not it either.
+Both behaviours are ordinary `display-buffer' action lists passed to
+`pop-to-buffer', not `switch-to-buffer'.  So `display-buffer-alist' still has
+the final say (a user who has placed tincan buffers deliberately keeps that
+placement), a dedicated or side window degrades to the fallback action rather
+than signalling, and `pop-to-buffer' selects the window it used, which is what
+the command promises.

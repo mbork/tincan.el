@@ -64,7 +64,7 @@ Commands:
 
 Keys - view:
 - =C-c SPC= / =r= - reply (compose buffer; jumps to the terminal when Claude waits)
-- =C-c o= / =t= - go to the terminal
+- =C-c o= / =t= - go to the terminal, in this window; =C-u= - separate window
 - =C-c k= - close the session (ends Claude in the terminal)
 - =C-c 0= - delete the terminal window
 - =q= - bury the view
@@ -83,7 +83,8 @@ Keys - view:
 - =RET= - visit the file at point; =?= - describe the mode
 
 Keys - terminal:
-- =C-c SPC= - reply; =C-c o= - go to the view; =C-c k= - close the session
+- =C-c SPC= - reply; =C-c o= - go to the view (=C-u= - separate window);
+  =C-c k= - close the session
 - =C-c C-c= - send a real interrupt (C-c) to Claude
 - =S-RET= - newline in Claude's prompt without submitting (needs kkp on a tty)
 - =C-z= - disabled (would suspend the TUI)

@@ -1938,22 +1938,30 @@ The command still runs; going to the terminal on purpose is exempted."
         (add-hook 'pre-command-hook fn nil t)))))
 
 ;; * Switching and closing
-(defun tincan--pop-to-sibling (buffer what)
-  "Show BUFFER in another window and select it (never the current window).
-WHAT names the buffer for the error when it is missing."
+(defun tincan--pop-to-sibling (buffer what &optional other-window)
+  "Go to BUFFER, the sibling of the current buffer in its session group (D53).
+A window already showing BUFFER on this frame wins; failing that BUFFER takes
+over the selected window, so the command never splits the frame on its own.
+With OTHER-WINDOW non-nil it is put in a separate window instead, reusing one
+that already shows it and splitting only when there is none.  WHAT names the
+buffer for the error when it is missing.  Both actions are `display-buffer'
+actions, so `display-buffer-alist' still has the final say."
   (unless (buffer-live-p buffer)
     (user-error "tincan: no %s linked (use M-x tincan-attach)" what))
-  (select-window (display-buffer buffer)))
+  (pop-to-buffer buffer
+                 (if other-window
+                     '((display-buffer-reuse-window display-buffer-pop-up-window))
+                   '((display-buffer-reuse-window display-buffer-same-window)))))
 
-(defun tincan-switch-terminal ()
-  "Show this session's terminal in another window and select it."
-  (interactive)
-  (tincan--pop-to-sibling (cdr (tincan--resolve-target)) "terminal"))
+(defun tincan-switch-terminal (&optional other-window)
+  "Go to this session's terminal, here or (with OTHER-WINDOW) in its own window."
+  (interactive "P")
+  (tincan--pop-to-sibling (cdr (tincan--resolve-target)) "terminal" other-window))
 
-(defun tincan-switch-view ()
-  "Show this session's view in another window and select it."
-  (interactive)
-  (tincan--pop-to-sibling (car (tincan--resolve-target)) "view"))
+(defun tincan-switch-view (&optional other-window)
+  "Go to this session's view, here or (with OTHER-WINDOW) in its own window."
+  (interactive "P")
+  (tincan--pop-to-sibling (car (tincan--resolve-target)) "view" other-window))
 
 (defun tincan-delete-terminal-window ()
   "Delete the window showing this session's terminal, if any (D35)."
