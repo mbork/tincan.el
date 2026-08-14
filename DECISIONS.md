@@ -689,9 +689,11 @@ is `invisible-p' and skipped either way) but also skipping conversation-hidden
 sections, which the outline command would not (`outline-invisible-p' only tests
 for the `outline' value).  `u' stays on `outline-up-heading' (it only climbs
 within a visible section).
-It is a snapshot: sections streaming in while it is on are not hidden until the
-next toggle.  Reusing `tincan-unfolded-sections' keeps this "conversation" notion
-aligned with the default fold set rather than hardcoding the two roles.
+It was originally a snapshot - sections streaming in while it was on stayed
+visible until the next toggle - which D52 replaced with an incremental pass, so
+it now keeps up with the stream.  Reusing `tincan-unfolded-sections' keeps this
+"conversation" notion aligned with the default fold set rather than hardcoding
+the two roles.
 
 ### D46 - Auto-align Markdown tables via `markdown-table-align'
 The view aligns Markdown tables automatically as sections stream in
@@ -985,3 +987,43 @@ draft file is ever created.  Known and accepted: a draft for a session that is
 never resumed keeps its file until removed by hand.  Pruning would need a policy
 (age?  dead session?) and the files are tiny; a stale one costs nothing until the
 day that session is resumed, when it is arguably what you wanted.
+
+### D52 - `tincan-conversation-only' keeps up with the stream (extends D45)
+Hiding used to be a snapshot of the moment `c' was pressed: every section that
+streamed in afterwards arrived visible, so watching a live session with the
+noise hidden meant pressing `c' twice again after each tool call.  Hiding is now
+incremental, `tincan--hide-new-sections' running from the filter after the D22
+autofold, the D46 table alignment and the D50 diff refinement - the same
+marker-driven shape as those three: `tincan--hide-marker' records how far the
+transcript has been hidden, each pass resumes there, and sections already passed
+are never revisited (a section revealed by hand stays revealed, as with folds).
+The whole-buffer pass is the same code: `tincan--hide-other-sections' now only
+arms the invisibility spec and resets the marker to `point-min' before calling
+the incremental one.  So there is exactly one place that decides what gets
+hidden, and the toggle-on view and the streaming view cannot drift apart.
+The subtlety is where the *last* section ends.  A hiding overlay runs from a
+section's @@@ heading to the next one, and for the trailing section that heading
+has not arrived yet, so its overlay runs to `point-max' and is remembered in
+`tincan--hide-tail-overlay': the next heading found closes it at its own start,
+and until then each pass stretches it to `point-max' again (an overlay does not
+grow by itself - text inserted at its end lands outside it).  That stretch only
+matters for a record that carries no @@@ heading of its own; under D47 records
+are whole rendered sections, so in practice each pass closes one overlay and
+opens the next.
+The trailing section is hidden as soon as its heading lands, rather than waiting
+for the next heading the way `tincan--autofold' waits before folding.  The two
+want opposite things: a fold on a still-arriving section would hide text you are
+watching arrive, whereas the point of this mode is that the noise never appears
+at all - and because records are complete sections, waiting would leave a
+TOOL_USE on screen for the whole of the tool call and a TOOL_RESULT until the
+next turn began, which is most of what there is to hide.
+Consequence, accepted: the follower keeps setting `window-point' to `point-max'
+(D30's tail following), which is now inside an invisible run whenever the last
+section is noise.  In a window that is not selected nothing disturbs it, so
+following keeps working and the next conversation section scrolls into view; in
+the selected window Emacs' own point adjustment pulls point out of the invisible
+text at the next command, landing at the end of the visible transcript - which
+is where toggling `c' on puts it anyway.
+`tincan-conversation-only' now sets `tincan--conversation-only' before hiding or
+revealing rather than after, since the shared pass tests that flag to decide
+whether it should do anything.

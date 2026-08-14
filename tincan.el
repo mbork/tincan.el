@@ -982,6 +982,12 @@ the enclosing heading and cycling it, so TAB folds a section from anywhere."
 (defvar-local tincan--hidden-overlays nil
   "Overlays that hide non-conversation sections for `tincan-conversation-only'.")
 
+(defvar-local tincan--hide-marker nil
+  "Marker up to which streamed @@@ sections have been hidden, while hiding is on.")
+
+(defvar-local tincan--hide-tail-overlay nil
+  "Overlay hiding the last @@@ section; its end is provisional until one follows.")
+
 (defun tincan--outline-ellipsis (show)
   "Make outline folds draw an ellipsis when SHOW is non-nil, else be silent.
 `tincan-conversation-only' silences it while hiding: a folded conversation
@@ -995,38 +1001,68 @@ between the ellipsis form `(outline . t)' and the bare symbol."
     (remove-from-invisibility-spec '(outline . t))
     (add-to-invisibility-spec 'outline)))
 
-(defun tincan--hide-other-sections ()
-  "Hide every section whose role is not in `tincan-unfolded-sections'.
-Covers the whole section - its @@@ heading through to the next @@@ marker - with
-an invisible overlay (spec `tincan-conversation', a bare symbol so there is no
-ellipsis), so it leaves the display entirely.  Overlays, not text properties:
+(defun tincan--hide-span (beg end)
+  "Cover BEG to END with a tracked invisible overlay and return it.
+The spec `tincan-conversation' is a bare symbol, so there is no ellipsis, and
+the section leaves the display entirely.  Overlays, not text properties:
 Markdown mode lists `invisible' in `font-lock-extra-managed-props', so it strips
 a text property on the next refontification (leaving only the between-block
 newlines); and the dedicated value keeps `outline-show-all' - which removes only
 `invisible'=`outline' overlays - from touching these.  The `priority' outranks
-any outline fold overlay underneath.  Outline ellipses are silenced meanwhile
-\(see `tincan--outline-ellipsis')."
+any outline fold overlay underneath."
+  (let ((ov (make-overlay beg end)))
+    (overlay-put ov 'invisible 'tincan-conversation)
+    (overlay-put ov 'priority 100)
+    (push ov tincan--hidden-overlays)
+    ov))
+
+(defun tincan--hide-new-sections ()
+  "Hide sections streamed since `tincan--hide-marker' (D52); no-op while off.
+Runs from the filter, so hiding keeps up with the stream instead of freezing at
+the toggle.  Each @@@ heading found ends the section before it, and opens one of
+its own - running to `point-max', since where it ends is not known yet - when
+its role is not in `tincan-unfolded-sections'.  The trailing overlay is then
+stretched to `point-max': a record carrying no heading of its own continues that
+last section, and the overlay does not grow by itself (text inserted at its end
+lands outside it)."
+  (when (and tincan--conversation-only tincan--hide-marker)
+    (save-excursion
+      (goto-char tincan--hide-marker)
+      (while (re-search-forward "^@@@ \\([A-Z_]+\\)" nil t)
+        (let ((role (match-string 1))
+              (heading (match-beginning 0)))
+          (when tincan--hide-tail-overlay
+            (move-overlay tincan--hide-tail-overlay
+                          (overlay-start tincan--hide-tail-overlay) heading)
+            (setq tincan--hide-tail-overlay nil))
+          (unless (member role tincan-unfolded-sections)
+            (setq tincan--hide-tail-overlay (tincan--hide-span heading (point-max))))
+          (set-marker tincan--hide-marker (line-end-position))))
+      (when tincan--hide-tail-overlay
+        (move-overlay tincan--hide-tail-overlay
+                      (overlay-start tincan--hide-tail-overlay) (point-max))))))
+
+(defun tincan--hide-other-sections ()
+  "Hide every section whose role is not in `tincan-unfolded-sections'.
+Covers the whole section - its @@@ heading through to the next @@@ marker - with
+an invisible overlay (see `tincan--hide-span').  This is the whole-buffer pass:
+it arms the state that `tincan--hide-new-sections' then advances section by
+section as more streams in.  Outline ellipses are silenced meanwhile (see
+`tincan--outline-ellipsis')."
   (add-to-invisibility-spec 'tincan-conversation)
   (tincan--outline-ellipsis nil)
-  (save-excursion
-    (goto-char (point-min))
-    (while (re-search-forward "^@@@ \\([A-Z_]+\\)" nil t)
-      (let ((role (match-string 1))
-            (start (match-beginning 0)))
-        (unless (member role tincan-unfolded-sections)
-          (let* ((end (or (save-excursion
-                            (when (re-search-forward "^@@@ " nil t)
-                              (match-beginning 0)))
-                          (point-max)))
-                 (ov (make-overlay start end)))
-            (overlay-put ov 'invisible 'tincan-conversation)
-            (overlay-put ov 'priority 100)
-            (push ov tincan--hidden-overlays)))))))
+  (setq tincan--hide-marker (copy-marker (point-min))
+        tincan--hide-tail-overlay nil)
+  (tincan--hide-new-sections))
 
 (defun tincan--show-all-sections ()
   "Undo `tincan--hide-other-sections', revealing every hidden section."
   (mapc #'delete-overlay tincan--hidden-overlays)
-  (setq tincan--hidden-overlays nil)
+  (setq tincan--hidden-overlays nil
+        tincan--hide-tail-overlay nil)
+  (when tincan--hide-marker
+    (set-marker tincan--hide-marker nil)
+    (setq tincan--hide-marker nil))
   ;; `add-to-invisibility-spec' does not de-duplicate, so drop our entry here
   ;; (its `delete' clears every copy) to keep repeated toggles from piling up.
   (remove-from-invisibility-spec 'tincan-conversation)
@@ -1037,13 +1073,14 @@ any outline fold overlay underneath.  Outline ellipses are silenced meanwhile
 When on, sections such as THINKING, TOOL_USE, TOOL_RESULT and DONE are made
 fully invisible - heading and body, not just folded - and skipped by the n/p,
 M-n/M-p and [/] navigation, leaving only the conversation (USER/ASSISTANT by
-default).  Toggle again to reveal them.  Acts on the current buffer contents;
-sections that stream in afterward are not hidden until you toggle again."
+default).  Toggle again to reveal them.  It stays on as the session runs:
+sections streaming in afterward are hidden as they arrive (D52)."
   (interactive)
   (if tincan--conversation-only
-      (progn (tincan--show-all-sections)
-             (setq tincan--conversation-only nil)
+      (progn (setq tincan--conversation-only nil)
+             (tincan--show-all-sections)
              (message "tincan: showing all sections"))
+    (setq tincan--conversation-only t)
     (tincan--hide-other-sections)
     ;; Point may have been inside a now-hidden section; move it somewhere shown.
     ;; Try the enclosing heading above, then (if the buffer opens on a hidden
@@ -1116,7 +1153,9 @@ Must stay in sync with tincan.py's RECORD_SEPARATOR.")
   "Follower output withheld until its record separator arrives (D47).")
 
 (defun tincan--insert-output (proc text)
-  "Insert TEXT at PROC's mark; follow the tail, track state, fold, align, refine."
+  "Insert TEXT at PROC's mark; follow the tail and run the per-record passes.
+State tracking, auto-folding, table alignment, diff refinement and - when it is
+on - conversation-only hiding all run here, each advancing its own marker."
   (with-current-buffer (process-buffer proc)
     ;; Before inserting, so fontification never sees the line unguarded.
     (tincan--guard-long-lines text)
@@ -1131,6 +1170,7 @@ Must stay in sync with tincan.py's RECORD_SEPARATOR.")
       (tincan--autofold)
       (tincan--align-new-tables)
       (tincan--refine-new-diffs)
+      (tincan--hide-new-sections)
       ;; Follow the tail in any window that was already at the end.
       (dolist (window (get-buffer-window-list (current-buffer) nil t))
         (when (>= (window-point window) old)
