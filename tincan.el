@@ -185,6 +185,7 @@ which would misnavigate because `outline-regexp' is not Markdown's."
   (outline-minor-mode 1)
   (setq-local tincan--fold-marker (copy-marker (point-min)))
   (setq-local tincan--table-marker (copy-marker (point-min)))
+  (setq-local tincan--refine-marker (copy-marker (point-min)))
   (tincan--autofold))
 
 ;; * Table alignment
@@ -254,6 +255,146 @@ stream in; this is a manual re-run."
     (save-excursion (tincan--align-tables-in (point-min) (point-max)))
     (when tincan--table-marker
       (set-marker tincan--table-marker (point-max)))))
+
+;; * Diff refinement
+;; An Edit renders as a ```diff block (D49), and `diff-mode' can already mark the
+;; changed words inside a hunk - but only as overlays, while markdown's native
+;; code-block fontification copies text *properties* back from its temp buffer
+;; and drops overlays on the floor.  So the refinement is bridged by hand: run
+;; `diff-mode' over a copy of the block, read back the spans it marked, and
+;; recreate them as overlays in the view, where they survive (overlays also work
+;; in a read-only buffer, as D22's folding already relies on).  The refinement
+;; shells out to `diff-command', so everything here degrades to a quiet no-op
+;; when that program is missing (D50).
+(declare-function diff-mode "diff-mode")
+(defvar diff-refine)
+
+(defcustom tincan-refine-diffs t
+  "If non-nil, mark the changed words inside rendered Edit diffs (D50).
+Uses `diff-mode''s own refinement, so the `diff-refine-added' and
+`diff-refine-removed' faces apply and a theme that styles them needs no extra
+setup.  Needs the external program named by `diff-command'; without it this is
+silently a no-op, and `tincan-refine-diff-blocks' says so on request."
+  :type 'boolean
+  :group 'tincan)
+
+(defvar-local tincan--refine-marker nil
+  "Marker up to which streamed @@@ sections have had their diffs refined.")
+
+(defvar tincan--diff-program-checked nil
+  "Cached search for `diff-command': nil (not yet looked), `yes' or `no'.")
+
+(defun tincan--diff-program-available-p ()
+  "Non-nil if the external program named by `diff-command' can be found.
+Refinement shells out to it once per hunk (via `smerge-refine-regions'), so the
+lookup is cached for the session rather than repeated per rendered block."
+  (unless tincan--diff-program-checked
+    (setq tincan--diff-program-checked
+          (if (and (boundp 'diff-command)
+                   (stringp diff-command)
+                   (executable-find diff-command))
+              'yes
+            'no)))
+  (eq tincan--diff-program-checked 'yes))
+
+(defun tincan--refine-supported-p ()
+  "Non-nil if refined diffs would actually be visible in this buffer.
+Refinement only makes sense on top of the native fontification that colors the
+diff body in the first place (D17); alone - in the plain `tincan-view-mode'
+fallback, or with code blocks left unfontified - it would mark words inside
+otherwise uncolored text, which reads worse than no refinement at all."
+  (and (derived-mode-p 'markdown-mode)
+       (bound-and-true-p markdown-fontify-code-blocks-natively)
+       (tincan--diff-program-available-p)))
+
+(defun tincan--refine-spans (text)
+  "Return a list of (BEG END FACE) for each refined span in diff TEXT.
+BEG and END are zero-based offsets into TEXT.  `diff-mode' records these as
+overlays, which is why they are read back here instead of copied as properties."
+  (with-temp-buffer
+    (insert text)
+    ;; The buffer is thrown away, and a user's `diff-mode-hook' has no business
+    ;; running once per rendered block, so keep the mode hooks out of it.
+    (delay-mode-hooks (diff-mode))
+    ;; Bound explicitly: refinement is `diff-mode''s default but a user may have
+    ;; turned it off globally, and here it is the whole point.
+    (let ((diff-refine 'font-lock))
+      (font-lock-ensure))
+    (let (spans)
+      (dolist (overlay (overlays-in (point-min) (point-max)) spans)
+        (let ((face (overlay-get overlay 'face)))
+          (when (memq face '(diff-refine-added diff-refine-removed))
+            (push (list (1- (overlay-start overlay))
+                        (1- (overlay-end overlay))
+                        face)
+                  spans)))))))
+
+(defun tincan--clear-refine-overlays (beg end)
+  "Delete tincan's refinement overlays between BEG and END."
+  (dolist (overlay (overlays-in beg end))
+    (when (overlay-get overlay 'tincan-refine)
+      (delete-overlay overlay))))
+
+(defun tincan--refine-block (beg end)
+  "Mark the changed words of the diff-block body spanning BEG to END.
+Any error is swallowed: a block that cannot be refined is left plain rather
+than allowed to break the insertion that is streaming it in."
+  (condition-case nil
+      (dolist (span (tincan--refine-spans (buffer-substring-no-properties beg end)))
+        (let ((overlay (make-overlay (+ beg (nth 0 span)) (+ beg (nth 1 span)))))
+          (overlay-put overlay 'face (nth 2 span))
+          (overlay-put overlay 'tincan-refine t)))
+    (error nil)))
+
+(defun tincan--refine-diffs-in (beg end)
+  "Refine every ```diff block opening between BEG and END.
+A block is refined as a whole, so its closing fence is sought without regard to
+END; an unterminated one is skipped and picked up once it is complete."
+  (save-excursion
+    (goto-char beg)
+    (let ((limit (copy-marker end)))
+      (while (re-search-forward "^[ ]\\{0,3\\}\\(`\\{3,\\}\\)diff[ \t]*$" limit t)
+        (let* ((fence (match-string 1))
+               (close-re (format "^[ ]\\{0,3\\}`\\{%d,\\}[ \t]*$" (length fence)))
+               (body-beg (progn (forward-line 1) (point))))
+          (when (re-search-forward close-re nil t)
+            (let ((body-end (line-beginning-position)))
+              ;; Clear first, so a re-run over a section is idempotent.
+              (tincan--clear-refine-overlays body-beg body-end)
+              (tincan--refine-block body-beg body-end)))))
+      (set-marker limit nil))))
+
+(defun tincan--refine-new-diffs ()
+  "Refine diffs in @@@ sections streamed since `tincan--refine-marker'.
+Mirrors `tincan--autofold': a section is only processed once another @@@ heading
+follows it, so a half-arrived block is never refined against a partial hunk."
+  (when (and tincan--refine-marker tincan-refine-diffs (tincan--refine-supported-p))
+    (save-excursion
+      (goto-char tincan--refine-marker)
+      (catch 'incomplete
+        (while (re-search-forward "^@@@ " nil t)
+          (let ((heading (match-beginning 0))
+                (next (save-excursion
+                        (and (re-search-forward "^@@@ " nil t) (match-beginning 0)))))
+            (unless next
+              (set-marker tincan--refine-marker heading)
+              (throw 'incomplete nil))
+            (tincan--refine-diffs-in heading next)
+            (set-marker tincan--refine-marker heading)))))))
+
+(defun tincan-refine-diff-blocks ()
+  "Mark the changed words in every rendered Edit diff in the view now.
+Automatic refinement (`tincan-refine-diffs') already does this as sections
+stream in; this is a manual re-run over the whole buffer."
+  (interactive)
+  (unless (derived-mode-p 'markdown-mode)
+    (user-error "tincan: diff refinement needs a Markdown mode (see `tincan-markdown-mode')"))
+  (unless (tincan--diff-program-available-p)
+    (user-error "tincan: diff refinement needs the `%s' program, which is not on PATH"
+                (if (boundp 'diff-command) diff-command "diff")))
+  (tincan--refine-diffs-in (point-min) (point-max))
+  (when tincan--refine-marker
+    (set-marker tincan--refine-marker (point-max))))
 
 ;; * Rendering
 (defcustom tincan-markdown-mode t
@@ -972,7 +1113,7 @@ Must stay in sync with tincan.py's RECORD_SEPARATOR.")
   "Follower output withheld until its record separator arrives (D47).")
 
 (defun tincan--insert-output (proc text)
-  "Insert TEXT at PROC's mark; follow the tail, track state, fold and align."
+  "Insert TEXT at PROC's mark; follow the tail, track state, fold, align, refine."
   (with-current-buffer (process-buffer proc)
     ;; Before inserting, so fontification never sees the line unguarded.
     (tincan--guard-long-lines text)
@@ -986,6 +1127,7 @@ Must stay in sync with tincan.py's RECORD_SEPARATOR.")
       (tincan--scan-for-state mark)
       (tincan--autofold)
       (tincan--align-new-tables)
+      (tincan--refine-new-diffs)
       ;; Follow the tail in any window that was already at the end.
       (dolist (window (get-buffer-window-list (current-buffer) nil t))
         (when (>= (window-point window) old)

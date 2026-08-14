@@ -872,3 +872,70 @@ which (for `len(new_lines) >= 200') drops lines occurring more than
 hunk; `unified_diff' exposes no way to disable it, so if large edits ever become
 common the fix is to build hunks from `SequenceMatcher(..., autojunk=False)'
 directly.  Not worth doing for one block.
+
+### D50 - Word-level refinement of rendered Edit diffs (extends D49)
+The ```diff blocks D49 renders now also mark the *changed words* within a hunk,
+using `diff-mode''s own refinement and its `diff-refine-added' /
+`diff-refine-removed' faces, so a theme that already styles a refined diff needs
+no further setup and tincan adds no faces of its own.  `tincan-refine-diffs'
+(default t) turns it off.
+It needs a bridge, which is the whole reason this is a decision rather than a
+one-liner.  `diff-mode' records refinement as *overlays* (`smerge-refine-regions'
+via `smerge--refine-highlight-change', which calls `make-overlay' unconditionally
+- there is no text-property mode), while `markdown-fontify-code-block-natively'
+fontifies a code block by copying text *properties* back from a throwaway temp
+buffer.  Overlays are simply dropped, so nothing survived: measured, a plain
+`diff-mode' buffer carries 6 overlays including `diff-refine-removed', and the
+same text through the markdown path carries 0, leaving only `(diff-removed
+markdown-code-face)'.
+So tincan does the copying itself.  `tincan--refine-spans' runs `diff-mode' over
+a copy of the block in a temp buffer (mode hooks suppressed with
+`delay-mode-hooks' - the buffer is discarded, and a user's `diff-mode-hook' has
+no business running once per rendered block), reads the offsets of the spans it
+marked, and `tincan--refine-block' recreates them as overlays in the view.
+Offsets map one-to-one because the temp buffer holds exactly the block text.
+Overlays rather than text properties in the view as well, for the D45 reason:
+font-lock manages `face', so a property would be stripped on the next
+refontification, whereas an overlay survives and works in a read-only buffer,
+which D22's folding already depends on.
+Application mirrors `tincan--align-new-tables' (D46) and `tincan--autofold'
+(D22): a buffer-local `tincan--refine-marker' advances over @@@ sections that
+already have a successor, so a half-arrived block is never refined against a
+partial hunk.  Re-running over a section is idempotent because
+`tincan--refine-diffs-in' clears that block's overlays before re-adding them,
+which is what makes the still-arriving last section safe to redo on every chunk.
+`tincan-refine-diff-blocks' is the manual whole-buffer re-run, mirroring
+`tincan-align-tables'.
+Refinement shells out to the external `diff-command' once per hunk, tincan's
+first hard runtime dependency on a program rather than a library, so it is
+written to degrade rather than fail.  `tincan--diff-program-available-p' caches a
+single `executable-find' per session (the lookup would otherwise repeat per
+block); without the program the streaming path is a silent no-op and only the
+explicit command reports why, since a message per rendered block would be worse
+than no refinement.  `tincan--refine-block' additionally wraps the work in
+`condition-case': a block that cannot be refined is left plain rather than
+allowed to break the insertion streaming it in.  Hunks over
+`diff-refine-threshold' (30000 chars) are skipped by `diff-mode' itself.
+Gated on `derived-mode-p 'markdown-mode' plus
+`markdown-fontify-code-blocks-natively', i.e. on the native fontification that
+colors the diff body in the first place (D17).  Alone - in the
+`tincan-view-mode' fallback, or with code blocks left unfontified - refinement
+would mark words inside otherwise uncolored text, which reads worse than no
+refinement at all.
+Overlay count is not a performance concern on the supported Emacs (D23 floor is
+30.1, and Emacs 29 replaced the overlay list with an interval tree).  Measured on
+a 2 MB, 39293-line transcript: appending 2 KB at end of buffer 200 times - the
+D21 filter's hot path - takes 0.0010 s with no overlays and 0.0009 s with 20000,
+i.e. flat, where the pre-29 implementation would have been linear in overlay
+count; a `vertical-motion' sweep of the whole buffer goes 0.028 s -> 0.047 s
+between the same extremes, and real redisplay only lays out a window's worth.
+Fontifying that buffer costs ~9 s regardless of overlays, so font-lock dominates
+by three orders of magnitude.  The realistic load is 3760 spans over 310 diff
+blocks, applied in 0.71 s for the whole buffer and one block at a time while
+streaming.
+This closes D49's open question about the `@@' hunk header: it must stay.
+Refinement needs a hunk header with *correct* line counts - with the header
+removed, or with counts that disagree with the body, `diff-mode' finds no hunk
+and marks nothing.  difflib always emits correct counts, so the requirement is
+met, but dropping the header to hide its snippet-relative line numbers would
+now silently cost word-level highlighting too.
