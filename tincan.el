@@ -110,6 +110,71 @@ Section markers of the form \"@@@ ROLE\" are font-locked according to the
 `tincan-tool-result' and `tincan-done' faces."
   (setq-local font-lock-defaults '(tincan-font-lock-keywords t)))
 
+;; * Fenced code blocks
+;; Two things need to know where the code blocks are: copying one (`w'), and
+;; keeping the outline out of them - a `#' line inside a Python block is a
+;; comment, not a Markdown heading (D54).  The fences are parsed from the buffer
+;; text rather than read off a Markdown mode's syntax properties, so the plain
+;; `tincan-view-mode' fallback gets the same answers; each opening fence is
+;; paired with a closing one of the same character and at least its length (the
+;; CommonMark rule), which tolerates code that itself contains shorter fences.
+;; The scan covers the whole buffer, so its result is cached until the text
+;; changes next: on a tailed transcript that is at most one scan per arriving
+;; chunk, and the many lookups a single fold or navigation command makes are
+;; then free.
+(defvar-local tincan--code-blocks-cache nil
+  "Content regions (BEG . END) of the buffer's fenced code blocks, in order.")
+
+(defvar-local tincan--code-blocks-tick nil
+  "`buffer-chars-modified-tick' when `tincan--code-blocks-cache' was built.")
+
+(defun tincan--scan-code-blocks ()
+  "Find every fenced code block; return their content regions in buffer order.
+A region runs from the line after the opening fence to the beginning of the
+closing fence line, so the fence lines themselves lie outside it.  An
+unterminated fence - the normal state of a block that is still streaming in -
+runs to the end of the buffer, and nothing inside it can open another block."
+  (let ((open-re "^[ ]\\{0,3\\}\\(`\\{3,\\}\\|~\\{3,\\}\\)")
+        (blocks nil))
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward open-re nil t)
+        (let* ((fence (match-string 1))
+               (close-re (format "^[ ]\\{0,3\\}%c\\{%d,\\}[ \t]*$"
+                                 (aref fence 0) (length fence)))
+               (content-beg (progn (forward-line 1) (point))))
+          (if (re-search-forward close-re nil t)
+              (push (cons content-beg (line-beginning-position)) blocks)
+            (push (cons content-beg (point-max)) blocks)
+            (goto-char (point-max))))))
+    (nreverse blocks)))
+
+(defun tincan--code-blocks ()
+  "The buffer's fenced code blocks, rescanned only after the text has changed."
+  (let ((tick (buffer-chars-modified-tick)))
+    (unless (eql tincan--code-blocks-tick tick)
+      (setq tincan--code-blocks-cache (tincan--scan-code-blocks))
+      (setq tincan--code-blocks-tick tick)))
+  tincan--code-blocks-cache)
+
+(defun tincan--code-block-at (pos)
+  "The fenced code block containing POS as (BEG . END), or nil if there is none.
+BEG and END delimit the content, so a fence line counts as outside its own
+block.  The blocks are ordered, so the walk stops at the first one beginning
+after POS."
+  (let ((blocks (tincan--code-blocks))
+        (found nil))
+    (while (and blocks (null found) (>= pos (caar blocks)))
+      (when (< pos (cdar blocks))
+        (setq found (car blocks)))
+      (setq blocks (cdr blocks)))
+    found))
+
+(defun tincan--code-block-at-point ()
+  "If point is inside a fenced code block, return (BEG . END) of its content.
+The content excludes the fence lines."
+  (tincan--code-block-at (point)))
+
 ;; * Folding
 ;; The @@@ sections are foldable with `outline-minor-mode'.  With
 ;; `outline-minor-mode-cycle', TAB on a section's @@@ heading cycles its
@@ -117,7 +182,9 @@ Section markers of the form \"@@@ ROLE\" are font-locked according to the
 ;; `tincan-unfolded-sections' starts folded, so thinking, tool calls/results and
 ;; DONE markers stay out of the way until opened.  Folding uses overlays, so it
 ;; works in the read-only buffer; auto-folding is marker-driven so manual
-;; unfolds are preserved.
+;; unfolds are preserved.  Which lines are headings is decided by
+;; `tincan--outline-search' rather than by `outline-regexp' alone, so that code
+;; inside fenced blocks cannot pose as one (D54).
 (require 'outline)
 
 (defcustom tincan-unfolded-sections '("USER" "ASSISTANT")
@@ -172,13 +239,57 @@ passed are not revisited, so manual unfolding is preserved."
           (beginning-of-line)
           (skip-chars-forward "#")))))
 
+(defvar tincan--heading-regexp "^\\(?:@@@\\|#+\\) "
+  "Any outline heading in the view: an @@@ marker or a Markdown heading.
+A match still has to survive `tincan--code-heading-p' to count as a heading.")
+
+(defun tincan--code-heading-p (pos)
+  "Non-nil if the heading matched at POS is really code rather than a heading.
+Only a Markdown heading can be: a line starting with `#' inside a fenced code
+block is a comment in Python, shell, Elisp and much else, and folding, cycling
+or navigating to it makes no sense (D54).  An @@@ marker counts as a heading
+wherever it is, because the autofold, hiding and state passes all read the
+marker lines straight from the buffer text and the outline has to agree with
+them."
+  (and (eq (char-after pos) ?#)
+       (tincan--code-block-at pos)
+       t))
+
+(defun tincan--outline-search (&optional bound move backward looking-at)
+  "Search for the next outline heading, ignoring headings that are code (D54).
+An `outline-search-function': searches for `tincan--heading-regexp' and skips
+any match `tincan--code-heading-p' rejects, so outline sees exactly the headings
+`tincan-next-heading' does.  BOUND limits the search and BACKWARD reverses it,
+as in `re-search-forward'; a non-nil MOVE moves point to BOUND (or the end of
+the buffer being searched towards) when nothing is found, and otherwise a failed
+search leaves point where it was.  A non-nil LOOKING-AT tests the line at point
+instead of searching."
+  (if looking-at
+      (and (looking-at tincan--heading-regexp)
+           (not (tincan--code-heading-p (match-beginning 0))))
+    (let ((origin (point))
+          (search (if backward #'re-search-backward #'re-search-forward))
+          (found nil))
+      (while (and (null found) (funcall search tincan--heading-regexp bound t))
+        (unless (tincan--code-heading-p (match-beginning 0))
+          (setq found t)))
+      (cond (found t)
+            (move (goto-char (or bound (if backward (point-min) (point-max))))
+                  nil)
+            (t (goto-char origin)
+               nil)))))
+
 (defun tincan--setup-folding ()
   "Enable folding in the current buffer and apply the default fold.
 Both @@@ section markers and Markdown headings are outline headings, so TAB
 cycles either; @@@ sections are top level and Markdown headings nest within.
 Markdown headings go through `outline-cycle' here rather than `markdown-cycle',
-which would misnavigate because `outline-regexp' is not Markdown's."
+which would misnavigate because `outline-regexp' is not Markdown's.
+`outline-regexp' is the same pattern as `tincan--heading-regexp' without its
+anchor, kept for whatever reads it directly; what outline itself searches with
+is `tincan--outline-search'."
   (setq-local outline-regexp "\\(?:@@@\\|#+\\) ")
+  (setq-local outline-search-function #'tincan--outline-search)
   (setq-local outline-level #'tincan--outline-level)
   (setq-local outline-minor-mode-highlight nil)
   (setq-local outline-minor-mode-cycle t)
@@ -895,14 +1006,13 @@ Markdown view keeps its own bindings.")
 (defvar tincan--marker-regexp "^@@@ [A-Z_]+"
   "Any @@@ ROLE section-marker line, whatever the role.")
 
-(defvar tincan--heading-regexp "^\\(?:@@@\\|#+\\) "
-  "Any outline heading in the view: an @@@ marker or a Markdown heading.")
-
 (defun tincan--move-marker (regexp n what)
   "Move to the Nth visible line matching REGEXP; a negative N moves backward.
 WHAT names the unit in the \"no more\" message.  Matches inside sections hidden
-by `tincan-conversation-only' are invisible and skipped.  Searching from the
-line end (forward) or beginning (backward) makes each step leave this line."
+by `tincan-conversation-only' are invisible and skipped, as are `#' lines inside
+code blocks (see `tincan--code-heading-p'), which are comments rather than
+headings.  Searching from the line end (forward) or beginning (backward) makes
+each step leave this line."
   (let* ((n (or n 1))
          (back (< n 0))
          (search (if back #'re-search-backward #'re-search-forward)))
@@ -911,7 +1021,8 @@ line end (forward) or beginning (backward) makes each step leave this line."
             (target nil))
         (if back (beginning-of-line) (end-of-line))
         (while (and (null target) (funcall search regexp nil t))
-          (unless (invisible-p (match-beginning 0))
+          (unless (or (invisible-p (match-beginning 0))
+                      (tincan--code-heading-p (match-beginning 0)))
             (setq target (match-beginning 0))))
         (if target
             (goto-char target)
@@ -1090,34 +1201,6 @@ sections streaming in afterward are hidden as they arrive (D52)."
       (when (invisible-p (point)) (tincan-next-heading 1)))
     (setq tincan--conversation-only t)
     (message "tincan: conversation only")))
-
-(defun tincan--code-block-at-point ()
-  "If point is inside a fenced code block, return (BEG . END) of its content.
-The content excludes the fence lines.  Parses the literal ``` / ~~~ fences in
-the buffer text (markup is always visible), pairing each opening fence with a
-closing one of the same character and at least its length (the CommonMark rule),
-so it is major-mode-independent and tolerates code containing shorter fences."
-  (let ((pos (point))
-        (open-re "^[ ]\\{0,3\\}\\(`\\{3,\\}\\|~\\{3,\\}\\)")
-        result)
-    (save-excursion
-      (goto-char (point-min))
-      (catch 'done
-        (while (re-search-forward open-re nil t)
-          (let* ((fence (match-string 1))
-                 (close-re (format "^[ ]\\{0,3\\}%c\\{%d,\\}[ \t]*$"
-                                   (aref fence 0) (length fence)))
-                 (content-beg (progn (forward-line 1) (point))))
-            (if (re-search-forward close-re nil t)
-                (let ((content-end (line-beginning-position)))
-                  (when (and (>= pos content-beg) (< pos content-end))
-                    (setq result (cons content-beg content-end))
-                    (throw 'done nil)))
-              ;; Unterminated fence: content runs to end of buffer.
-              (when (>= pos content-beg)
-                (setq result (cons content-beg (point-max))))
-              (throw 'done nil))))))
-    result))
 
 (defun tincan-copy-section ()
   "Copy code or section text at point to the kill ring.

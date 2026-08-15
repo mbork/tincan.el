@@ -268,7 +268,8 @@ a section or a heading within it.  Markdown headings deliberately go through
 `outline-regexp'/`outline-level', which we have repurposed, so it would jump to
 the wrong place and error (`markdown-end-of-subtree' on a nil position).  The
 trade-off is that a `#'-prefixed line inside a code block also looks like a
-heading, which is harmless (it just becomes foldable).
+heading, which is harmless (it just becomes foldable).  (It was not harmless;
+D54 revisits this and takes heading detection off `outline-regexp'.)
 `outline-minor-mode-cycle' (Emacs 28.1+) binds TAB on a heading to
 `outline-cycle' and S-TAB to `outline-cycle-buffer'.  This wins over the major
 mode's TAB on headings because outline installs the binding on the heading via
@@ -1056,3 +1057,54 @@ the final say (a user who has placed tincan buffers deliberately keeps that
 placement), a dedicated or side window degrades to the fallback action rather
 than signalling, and `pop-to-buffer' selects the window it used, which is what
 the command promises.
+
+### D54 - Code blocks are not outline headings (revisits D22)
+D22 accepted that a `#'-prefixed line inside a code block also looks like a
+heading, calling it harmless.  It is not: agentic transcripts are mostly code,
+and `# ' begins a comment in Python, shell, Elisp, Ruby, YAML, Makefiles and
+more, so a single Python block scatters half a dozen fake headings through a
+section.  TAB inside such a block folded at the comment above point and ate the
+rest of the block; `n'/`p' stopped on comment lines; `u' climbed from code to a
+comment rather than to the enclosing `@@@' marker; and cycling a section
+listed the comments as its children.
+The regexp cannot express this, because whether a `#' line is a heading depends
+on the fences above it, not on the line.  So heading detection moves off
+`outline-regexp' onto `outline-search-function' (Emacs 29+, comfortably inside
+D23's 30.1 floor): `tincan--outline-search' searches for the same pattern and
+skips any match `tincan--code-heading-p' rejects.  outline.el routes every
+heading question through that hook - forward and backward search, the
+`looking-at' test, and hence `outline-on-heading-p', which is also what the
+`outline-minor-mode-cycle' keymap filters TAB on - so one function fixes
+folding, cycling, `outline-up-heading' and outline's own motion together.
+`outline-regexp' is still set, unanchored, for anything that reads it directly.
+`tincan--move-marker' consults the same predicate, so `n'/`p' and outline agree
+on what a heading is; with a `@@@'-only regexp the predicate answers on the
+first character and costs nothing.
+`@@@' markers count as headings wherever they appear, including inside a fence.
+The asymmetry is deliberate: `tincan--autofold', the D52 hiding pass and the
+state machine all read marker lines straight from the buffer text, and an
+outline that disagreed with them would fold one thing and hide another.  A
+literal `@@@ USER' inside a tool result therefore still splits a section, as it
+did before - a pre-existing limit of the marker protocol, not something the
+outline should paper over on its own.
+The fences are parsed from the buffer text (`tincan--scan-code-blocks'), not
+read off a Markdown mode's syntax properties, so the plain `tincan-view-mode'
+fallback behaves identically; the pairing rule is CommonMark's - a closing fence
+of the same character and at least the opening length - which keeps a nested
+```python inside a longer ```` fence from closing the outer block.  An
+unterminated fence runs to `point-max', so a block still streaming in is treated
+as code all the way down, which is the right answer while it arrives and is
+re-decided once the closing fence lands.
+The scan covers the whole buffer and is cached against
+`buffer-chars-modified-tick', so it runs at most once per arriving chunk and
+every lookup within a fold or a navigation command is free.  Deliberately not
+the marker-driven incremental shape the folding, table, refinement and hiding
+passes use (D22, D46, D50, D52): those markers are advisory - a stale one only
+means a fold is missed - whereas a stale block list would misclassify headings,
+and a full revert (auto-revert falls back to one when the file shrinks) would
+leave exactly that.  A full rescan is immune and cheap enough: ~18 ms on a 2 MB,
+184k-line transcript holding 4000 code blocks, which is smaller than fontifying
+the chunk that triggered it.
+`tincan--code-block-at-point' (the `w' copy of D37) now shares the scan instead
+of walking the buffer itself, so there is one parse of the fences rather than
+two.
