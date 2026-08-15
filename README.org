@@ -204,10 +204,17 @@ Either way the =@@@ ROLE= section markers (=USER=, =ASSISTANT=, =THINKING=,
 =TOOL_USE=, =TOOL_RESULT=, and =DONE=) are font-locked and the buffer is
 read-only.
 
-Two tool calls get a shape of their own instead of raw JSON, path on the marker
+Three tool calls get a shape of their own instead of raw JSON, path on the marker
 line: =Write= - file content, language from the extension; =Edit= - unified diff
 of the replaced snippet, fontified by =diff-mode=.  Line numbers relative to the
-snippet, so readable but not appliable.
+snippet, so readable but not appliable.  =Bash= - the command as a ```bash block,
+description below it, and =(background)=/=(timeout Ns)= on the marker line.
+
+With [[https://github.com/mvdan/sh][=shfmt=]] on =PATH=, a =;=-chained one-liner arrives as one command per line
+(indented inside =( )=), heredocs untouched; without it, the command verbatim.
+Not wrapped either way: a long pipeline stays one line - soft-wrapped in the view
+- and a one-line =if ...; then ...; fi= or =&&= chain keeps its shape.  Off with
+=tincan-format-commands=.
 
 The sections are foldable: =TAB= cycles a section's visibility - on its =@@@=
 heading or from anywhere inside its body - and =S-TAB= cycles the whole buffer.
@@ -239,6 +246,7 @@ Relevant options (=M-x customize-group RET tincan RET=):
 - =tincan-markdown-mode= - which Markdown mode to use, or =nil= to disable it.
 - =tincan-fontify-code-blocks-natively= - per-language code-block highlighting.
 - =tincan-format-tables= - auto-align Markdown tables as they stream in.
+- =tincan-format-commands= - pretty-print Bash commands with =shfmt=.
 
 ** Knowing when Claude wants your input (optional)
 

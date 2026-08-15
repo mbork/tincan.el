@@ -1108,3 +1108,61 @@ the chunk that triggered it.
 `tincan--code-block-at-point' (the `w' copy of D37) now shares the scan instead
 of walking the buffer itself, so there is one parse of the fences rather than
 two.
+
+### D55 - A `Bash` tool use renders as a ```bash block (extends D39)
+The most frequent tool had the least readable rendering: a JSON object whose
+one interesting field was a shell command with every quote backslashed and every
+newline written `\n`.  D39 already carved out `Write` (file content as code) and
+D49 `Edit` (a unified diff); `Bash` gets the same treatment, since a command
+line is code too.  The command becomes a ```bash block - `markdown-mode` maps
+that fence language to `sh-mode`, so it is fontified like any other code - and
+the model's own `description` goes underneath as a caption.  ```bash rather than
+the ```sh that `EXT_TO_LANG` gives a `.sh` file: this is specifically a bash
+command, and both fences fontify.
+The inputs that are not the command say how it ran rather than what it was, so
+they go on the marker line as notes - `(background)`, `(timeout 180s)`,
+`(no sandbox)` - the way `Edit` shows `(replace_all)`.  A record carrying a
+field this does not account for falls back to the JSON body, so an input tincan
+has never seen is impossible to drop silently; that is the same fallback a
+malformed `Edit` or `Write` takes.
+The description passes through `body_line', a sibling of `marker_text' for text
+that lands in a block's body rather than on a marker line: whitespace is
+collapsed so the value cannot forge a second line, and a value beginning with
+`@@@`, a fence run or `#` is dropped rather than rendered.  The fence run is the
+one that matters - a caption opening a code block would swallow the rest of the
+transcript - and no caption is worth that, especially one that only repeats what
+the command says.
+
+### D56 - Pretty-printing Bash commands with `shfmt` (extends D55)
+Commands here are `;`-chained one-liners (87% of the `Bash` calls in a real
+transcript hold a `;` or a newline), which read badly however they are
+fontified.  Splitting them ourselves is not an option: deciding which `;` or `|`
+is an operator and which sits inside quotes, a heredoc, `$( )` or `[[ =~ ]]`
+needs a real shell parser, and getting it wrong would print a command that is
+not the one that ran.  `shfmt` is that parser, so when it is on PATH the command
+is piped through it (`--language-dialect bash --indent 2 --binary-next-line
+--case-indent`): a `;` list comes out as one command per line, indented when the
+list sits inside `( )`, and a heredoc body passes through untouched.
+What it does not do is worth stating, because it bounds the whole feature.
+`shfmt` has no line-wrapping, so a long pipeline stays on its line and the view
+soft-wraps it - and no flag will change that, it is a deliberate absence
+upstream.  It also preserves a compound command written on one line: `if ...;
+then ...; fi`, `for ...; do ...; done` and `&&` chains come back as they went
+in, since only a `;` list at the top level of a script (or subshell) is split.
+So the win is real for the shape these commands actually take - a run of
+independent commands chained with `;` - and nil for a single long pipeline.
+Every failure path returns the command unchanged - not installed, cannot parse
+it, non-zero exit, or slower than `SHFMT_TIMEOUT_SECONDS` - so a formatter that
+is missing, broken or wedged costs a record nothing, and in `--follow` cannot
+stall the stream behind it.  Formatting is skipped outright unless the command
+holds a `;` or a newline, since nothing else can change under `shfmt`: on the
+biggest local transcript that is 356 subprocesses over 407 `Bash` calls, 1.14 s
+against 0.26 s for the same print with `--no-shfmt`, and a single spawn per
+record while following.  No memo cache of formatted commands: 1353
+triggering commands across every local transcript were 1316 distinct ones, so
+there is next to nothing to reuse.
+Reformatting is not a fidelity problem the way a rewritten diff would be:
+`shfmt` is a parser and printer, the transcript on disk stays the record of
+what ran, and `w` still copies a command that runs identically.
+Off with `--no-shfmt`, which `tincan-format-commands` passes for an Emacs user
+who wants the raw command line.

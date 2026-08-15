@@ -10,6 +10,7 @@ import json
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -185,6 +186,23 @@ def marker_text(value, default=""):
         return default
     return value
 
+# Line beginnings that carry structure in the rendered transcript: a body line
+# starting with one of these would fake a section marker, open a code fence that
+# swallows everything after it, or forge a Markdown heading.
+UNSAFE_LINE_PREFIXES = ("@@@", "```", "~~~", "#")
+
+def body_line(value):
+    # A model-written field rendered as one plain line inside a block's body, or
+    # "" when it cannot be.  Whitespace is collapsed, newlines included, so the
+    # value cannot forge a second line, and a structural beginning disqualifies
+    # it: the text is a caption, and no caption is worth the rest of the block.
+    if not isinstance(value, str):
+        return ""
+    collapsed = " ".join(value.split())
+    if collapsed.startswith(UNSAFE_LINE_PREFIXES):
+        return ""
+    return collapsed
+
 # Tools whose input is dominated by file content: render that content as a code
 # block (in the file's language) instead of escaped JSON.  Maps tool name to the
 # input fields holding the path and the content.
@@ -241,6 +259,103 @@ def render_edit(tool_input, timestamp):
         header += " (replace_all)"
     return format_block(header, "\n".join(lines), lang="diff", timestamp=timestamp)
 
+# ** Bash commands
+# A "Bash" tool use is a command line, so it reads far better as a ```bash block
+# (which the Emacs side fontifies with `sh-mode') than as a JSON string, with the
+# model's own one-line description as a caption under it (D55).
+# When `shfmt' is on PATH the command is pretty-printed first (D56): a real shell
+# parser, so a `;'-chained one-liner comes out as one command per line - indented
+# when the list is inside `( )' - with heredoc bodies passed through untouched
+# and no risk of rewriting what the command does.  Without it, or when it cannot
+# parse the command, the command is shown exactly as it was run.  What shfmt
+# leaves alone: it does no line wrapping, so a long pipeline stays on one line
+# (the view soft-wraps it), and a compound command written on one line, such as
+# `if ...; then ...; fi' or an `&&' chain, keeps that form.
+SHFMT_COMMAND = ("shfmt", "--language-dialect", "bash", "--indent", "2",
+                 "--binary-next-line", "--case-indent")
+SHFMT_TIMEOUT_SECONDS = 5
+# Formatting can only ever change a command holding more than one statement, so
+# anything simpler skips the subprocess: printing a transcript spawns shfmt once
+# per command that stands to gain from it, not once per Bash call.
+SHFMT_TRIGGERS = (";", "\n")
+format_commands = True
+shfmt_program = None
+
+def shfmt_available():
+    # Whether shfmt is installed, looked up once and remembered.
+    global shfmt_program
+    if shfmt_program is None:
+        shfmt_program = shutil.which(SHFMT_COMMAND[0]) or ""
+    return bool(shfmt_program)
+
+def format_command(command):
+    # COMMAND pretty-printed, or COMMAND unchanged when it cannot be or would not
+    # gain from it.  Every failure path returns the original: a tidier command is
+    # a nicety, and a missing, broken or slow formatter must not cost a record
+    # its rendering (nor, in --follow, stall the stream behind it).
+    if not format_commands:
+        return command
+    if not any(trigger in command for trigger in SHFMT_TRIGGERS):
+        return command
+    if not shfmt_available():
+        return command
+    try:
+        completed = subprocess.run(SHFMT_COMMAND, input=command,
+                                   capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   timeout=SHFMT_TIMEOUT_SECONDS)
+    except (OSError, subprocess.SubprocessError):
+        return command
+    if completed.returncode != 0:
+        return command
+    formatted = completed.stdout.strip("\n")
+    if not formatted.strip():
+        return command
+    return formatted
+
+# The Bash inputs this rendering accounts for.  A record carrying any other field
+# falls back to the JSON body, so an input tincan does not know about is never
+# dropped silently - the same rule the Edit and content-tool paths follow.
+BASH_FIELDS = frozenset(("command", "description", "timeout",
+                         "run_in_background", "dangerouslyDisableSandbox"))
+
+def bash_marker_notes(tool_input):
+    # The Bash inputs that are not the command itself, as short marker-line
+    # notes: they say how the command was run rather than what it was, so inside
+    # the ```bash block they would read as part of the command.
+    notes = []
+    if tool_input.get("run_in_background"):
+        notes.append("background")
+    if tool_input.get("dangerouslyDisableSandbox"):
+        notes.append("no sandbox")
+    timeout = tool_input.get("timeout")
+    # A bool is an int in Python, and "timeout true" is not a timeout.
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+        # Claude Code counts this one in milliseconds.
+        notes.append("timeout {:g}s".format(timeout / 1000))
+    return notes
+
+def render_bash(tool_input, timestamp):
+    # None when TOOL_INPUT is not a renderable Bash use - no command, or a field
+    # this does not account for - so the caller can fall back to the JSON
+    # rendering rather than drop the block.
+    command = tool_input.get("command")
+    if not isinstance(command, str) or not command.strip():
+        return None
+    if not set(tool_input).issubset(BASH_FIELDS):
+        return None
+    header = ROLE_TOOL_USE + " Bash"
+    notes = bash_marker_notes(tool_input)
+    if notes:
+        header += " (" + ", ".join(notes) + ")"
+    body = fence_body(format_command(command).strip("\n"), "bash")
+    description = body_line(tool_input.get("description"))
+    if description:
+        body += "\n" + description
+    # The body is fenced already: the description has to stay outside the fence.
+    return format_block(header, body, timestamp=timestamp)
+
+# ** Tool use dispatch, and tool results
 def render_tool_use(block, timestamp):
     # Sanitize the name before it is used, since it both lands on the marker line
     # and keys a dict lookup that an unhashable value would break.
@@ -248,6 +363,10 @@ def render_tool_use(block, timestamp):
     tool_input = block.get("input")
     if name == "Edit" and isinstance(tool_input, dict):
         rendered = render_edit(tool_input, timestamp)
+        if rendered:
+            return rendered
+    if name == "Bash" and isinstance(tool_input, dict):
+        rendered = render_bash(tool_input, timestamp)
         if rendered:
             return rendered
     spec = CONTENT_TOOLS.get(name)
@@ -663,6 +782,10 @@ def build_parser():
         "--days", type=int, metavar="N",
         help="with --show-sessions, keep only sessions active within the last N days")
     parser.add_argument(
+        "--no-shfmt", action="store_true",
+        help="show Bash commands exactly as they were run, instead of"
+             " pretty-printing them with shfmt when it is installed")
+    parser.add_argument(
         "--notification-hook", action="store_true",
         help="run as a Claude Code Notification hook (reads event JSON on stdin)")
     parser.add_argument(
@@ -703,6 +826,9 @@ def main():
         return
     if not args.session:
         parser.error("a session id is required (or use --show-sessions)")
+    if args.no_shfmt:
+        global format_commands
+        format_commands = False
     path = resolve_session_file(args.session, wait=args.wait and args.follow)
     if args.follow:
         global frame_records

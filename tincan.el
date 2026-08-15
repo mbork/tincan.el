@@ -528,6 +528,18 @@ continuously tailed transcript."
   :type 'boolean
   :group 'tincan)
 
+(defcustom tincan-format-commands t
+  "If non-nil, let tincan.py pretty-print Bash commands with `shfmt' (D56).
+A `Bash' tool use is always rendered as a ```bash block; this only controls
+whether the command is run through `shfmt' first, which puts each command of a
+`;'-chained one-liner on its own line, indenting the list when it sits inside
+`( )'.  A long pipeline is not wrapped, and a compound command written on one
+line (`if ...; then ...; fi', an `&&' chain) keeps that form.  It applies when
+`shfmt' is on PATH and is silently skipped when it is not.  Nil passes
+`--no-shfmt' to tincan.py, showing every command exactly as it was run."
+  :type 'boolean
+  :group 'tincan)
+
 ;; Declared by markdown-mode; forward declaration keeps the byte-compiler quiet.
 (defvar markdown-fontify-code-blocks-natively)
 
@@ -1340,8 +1352,10 @@ title (hence the name) can change; BUFFER-NAME names a freshly created one."
           (let ((proc (make-process
                        :name (format "tincan-%s" session)
                        :buffer buffer
-                       :command (list "python3" tincan-script session
-                                      "--follow" "--wait")
+                       :command (append (list "python3" tincan-script session
+                                              "--follow" "--wait")
+                                        (unless tincan-format-commands
+                                          (list "--no-shfmt")))
                        :connection-type 'pipe
                        :filter #'tincan--filter
                        :sentinel #'tincan--sentinel
