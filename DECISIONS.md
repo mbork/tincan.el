@@ -1166,3 +1166,38 @@ Reformatting is not a fidelity problem the way a rewritten diff would be:
 what ran, and `w` still copies a command that runs identically.
 Off with `--no-shfmt`, which `tincan-format-commands` passes for an Emacs user
 who wants the raw command line.
+
+### D57 - Model-written text and out-of-band events, taken too literally
+Two independent bugs with the same root shape: something outside our control -
+prose the model wrote, an event Claude Code raised - was read as if it meant
+exactly what it looked like.
+
+Fences.  Assistant, user and thinking text is rendered verbatim (`format_block`
+with `lang=None`), so a fence the model writes in prose is a real fence in the
+view.  When prose nests two same-length fences - quoting a plan in a ``` block
+that itself contains a ```yaml block - the inner closer ends the outer block
+early and the outer closer is read as a new opener.  Under the old
+whole-buffer scan that opener never paired, so by the scanner's own rule it ran
+to `point-max' and swallowed the rest of the buffer: every `#' line after it
+became a comment, `n' jumped from mid-answer straight to `@@@ DONE', and the
+damage healed only when a later turn's ```bash block donated a closing fence.
+`tincan--scan-code-blocks' now scans per `@@@' section *and* refuses to open a
+block on a fence never closed inside one.  Both halves are needed, and neither
+suffices alone: section scoping stops a stray fence from swallowing later
+records, dropping unterminated fences stops it from swallowing the rest of its
+own section.  What licenses the second half is D47's premise, extended from
+streaming to parsing - records arrive whole, so an unterminated fence in a
+complete section is malformed input, not a block still on its way.
+The cost is real and bounded: splitting on `^@@@ [A-Z_]+' means a tool result
+that *prints* such a line truncates its own fenced body, so its closing fence
+falls outside the section and the block is dropped.  Measured over 25 rendered
+sessions, 4104 blocks became 4105 and 4 of 561 `#' heading lines moved from
+"code" back to "heading", while 38 `@@@' markers wrongly reported as living
+inside a code block became none.  That trade is also a consistency win:
+`tincan--code-heading-p' already treats an `@@@' marker as a heading wherever it
+appears (D54), because autofold, D52 hiding and the state scan all read marker
+lines straight from the buffer text; making the fence scan agree removes a
+disagreement rather than adding one.  The principled fix is bigger and deferred:
+record true record boundaries as text properties at insert time - `tincan--filter'
+already splits on `RECORD_SEPARATOR' and throws the boundaries away - which would
+also harden autofold, hiding and state scanning against the same forgery.

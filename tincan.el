@@ -110,6 +110,9 @@ Section markers of the form \"@@@ ROLE\" are font-locked according to the
 `tincan-tool-result' and `tincan-done' faces."
   (setq-local font-lock-defaults '(tincan-font-lock-keywords t)))
 
+(defvar tincan--marker-regexp "^@@@ [A-Z_]+"
+  "Any @@@ ROLE section-marker line, whatever the role.")
+
 ;; * Fenced code blocks
 ;; Two things need to know where the code blocks are: copying one (`w'), and
 ;; keeping the outline out of them - a `#' line inside a Python block is a
@@ -118,10 +121,13 @@ Section markers of the form \"@@@ ROLE\" are font-locked according to the
 ;; `tincan-view-mode' fallback gets the same answers; each opening fence is
 ;; paired with a closing one of the same character and at least its length (the
 ;; CommonMark rule), which tolerates code that itself contains shorter fences.
-;; The scan covers the whole buffer, so its result is cached until the text
-;; changes next: on a tailed transcript that is at most one scan per arriving
-;; chunk, and the many lookups a single fold or navigation command makes are
-;; then free.
+;; The scan runs per `@@@' section rather than over the whole buffer: assistant
+;; and user text is rendered verbatim, so a fence the model writes in prose is a
+;; real fence here, and it must not be allowed to escape its own record and
+;; invert the parity of every block after it (D57).  Its result is cached until
+;; the text changes next: on a tailed transcript that is at most one scan per
+;; arriving chunk, and the many lookups a single fold or navigation command
+;; makes are then free.
 (defvar-local tincan--code-blocks-cache nil
   "Content regions (BEG . END) of the buffer's fenced code blocks, in order.")
 
@@ -131,22 +137,35 @@ Section markers of the form \"@@@ ROLE\" are font-locked according to the
 (defun tincan--scan-code-blocks ()
   "Find every fenced code block; return their content regions in buffer order.
 A region runs from the line after the opening fence to the beginning of the
-closing fence line, so the fence lines themselves lie outside it.  An
-unterminated fence - the normal state of a block that is still streaming in -
-runs to the end of the buffer, and nothing inside it can open another block."
+closing fence line, so the fence lines themselves lie outside it.  Scanning is
+per @@@ section, and a fence left unclosed inside one opens nothing: records
+arrive whole (D47), so an unterminated fence in a complete section is a
+mis-paired one - typically prose that nested two same-length fences - and
+honoring it would invert the parity of everything after it (D57)."
   (let ((open-re "^[ ]\\{0,3\\}\\(`\\{3,\\}\\|~\\{3,\\}\\)")
         (blocks nil))
     (save-excursion
       (goto-char (point-min))
-      (while (re-search-forward open-re nil t)
-        (let* ((fence (match-string 1))
-               (close-re (format "^[ ]\\{0,3\\}%c\\{%d,\\}[ \t]*$"
-                                 (aref fence 0) (length fence)))
-               (content-beg (progn (forward-line 1) (point))))
-          (if (re-search-forward close-re nil t)
-              (push (cons content-beg (line-beginning-position)) blocks)
-            (push (cons content-beg (point-max)) blocks)
-            (goto-char (point-max))))))
+      (while (< (point) (point-max))
+        ;; Point is at the start of a section: point-min, or a marker's BOL.
+        ;; Skip the marker's own line before looking for the section's end.
+        (let ((limit (save-excursion
+                       (forward-line 1)
+                       (if (re-search-forward tincan--marker-regexp nil t)
+                           (line-beginning-position)
+                         (point-max)))))
+          (while (re-search-forward open-re limit t)
+            (let* ((fence (match-string 1))
+                   (close-re (format "^[ ]\\{0,3\\}%c\\{%d,\\}[ \t]*$"
+                                     (aref fence 0) (length fence)))
+                   (content-beg (progn (forward-line 1) (point))))
+              (if (re-search-forward close-re limit t)
+                  (push (cons content-beg (line-beginning-position)) blocks)
+                ;; Unterminated inside a complete record: not a block.
+                ;; Resume after the opener, so a later fence in the same
+                ;; section still pairs normally.
+                (goto-char content-beg))))
+          (goto-char limit))))
     (nreverse blocks)))
 
 (defun tincan--code-blocks ()
@@ -1014,9 +1033,6 @@ Markdown view keeps its own bindings.")
 
 (defvar tincan--turn-regexp "^@@@ \\(?:USER\\|ASSISTANT\\)\\b"
   "Marker lines that begin an actual conversation turn (USER/ASSISTANT).")
-
-(defvar tincan--marker-regexp "^@@@ [A-Z_]+"
-  "Any @@@ ROLE section-marker line, whatever the role.")
 
 (defun tincan--move-marker (regexp n what)
   "Move to the Nth visible line matching REGEXP; a negative N moves backward.
