@@ -800,7 +800,13 @@ within that many days (see `tincan--resume-scope')."
 ;; `tincan--scan-marker' tracks how far we have scanned, so chunked/partial
 ;; lines are handled the same way the follower handles partial writes.
 (defvar-local tincan--state nil
-  "Current agent state for the buffer: nil, `working', `idle' or `needs-input'.")
+  "Current agent state for the buffer: nil, `working' or `idle'.")
+
+(defvar-local tincan--needs-input nil
+  "Non-nil when Claude is blocked on a prompt in the terminal.
+Out-of-band information from the Notification hook (D20), deliberately kept
+apart from `tincan--state': that one is derived from the transcript, and
+storing both in one variable made each clobber the other (D57).")
 
 (defvar-local tincan--scan-marker nil
   "Marker up to which output has been scanned for state markers.")
@@ -817,28 +823,41 @@ within that many days (see `tincan--resume-scope')."
   "Mode-line face shown when Claude is waiting for your input."
   :group 'tincan)
 
-(defun tincan--state-string (state)
-  "Return the indicator string for STATE, shared by the mode line and header."
-  (pcase state
-    ('working (propertize " [working]" 'face 'tincan-state-working))
-    ('idle (propertize " [idle]" 'face 'tincan-state-idle))
-    ('needs-input (propertize " [needs input]" 'face 'tincan-state-needs-input))
-    (_ "")))
+(defun tincan--indicator ()
+  "Indicator for the mode line and header: transcript state plus prompt flag.
+Both the mode line and the header line read it through an :eval, so it is
+re-evaluated whenever either half changes."
+  (concat (pcase tincan--state
+            ('working (propertize " [working]" 'face 'tincan-state-working))
+            ('idle (propertize " [idle]" 'face 'tincan-state-idle))
+            (_ ""))
+          (when tincan--needs-input
+            (propertize " [needs input]" 'face 'tincan-state-needs-input))))
 
 (defun tincan--set-state (state)
   "Set the buffer's tincan STATE and reflect it in the mode line and header.
-The header line uses the same `tincan--state-string' via its :eval, so
-refreshing the mode line refreshes both."
+The header line uses the same `tincan--indicator' via its :eval, so refreshing
+the mode line refreshes both."
   (unless (eq tincan--state state)
     (setq tincan--state state)
-    (setq-local mode-line-process (tincan--state-string state))
     (force-mode-line-update)))
 
+(defun tincan--set-needs-input (flag)
+  "Set or clear the `needs-input' flag and refresh the indicators."
+  (let ((flag (and flag t)))
+    (unless (eq tincan--needs-input flag)
+      (setq tincan--needs-input flag)
+      (force-mode-line-update))))
+
 (defun tincan--update-state-from-line (line)
-  "Update the agent state from a completed transcript LINE."
+  "Update the agent state from a completed transcript LINE.
+Any new output means Claude is no longer blocked on a prompt, so it also
+clears `tincan--needs-input'."
   (cond ((string-prefix-p "@@@ DONE" line)
+         (tincan--set-needs-input nil)
          (tincan--set-state 'idle))
         ((not (string-empty-p line))
+         (tincan--set-needs-input nil)
          (tincan--set-state 'working))))
 
 ;; ** Long-line emphasis guard
@@ -894,7 +913,7 @@ streams in later, the guard re-arms itself."
   (interactive "P")
   (unless tincan--emphasis-suppressed
     (user-error "tincan: emphasis fontification is already active"))
-  (unless (or force (memq tincan--state '(idle needs-input)))
+  (unless (or force (eq tincan--state 'idle) tincan--needs-input)
     (user-error "tincan: agent still working; C-u %s forces it now"
                 (substitute-command-keys "\\[tincan-refontify]")))
   (setq tincan--emphasis-suppressed nil)
@@ -917,9 +936,12 @@ any incomplete trailing line so a later chunk completes it."
 
 ;; ** Notification watch
 ;; The hook writes <config-dir>/tincan/<session-id>.notify when Claude wants
-;; input (D20).  We watch the directory (the file may not exist yet) and flag
-;; `needs-input' on a write; resumed transcript activity clears it back to
-;; `working' or `idle'.
+;; input (D20): the notification's kind on the first line, the original message
+;; on the second.  We watch the directory (the file may not exist yet) and raise
+;; `tincan--needs-input' on a permission prompt.  The kind matters because the
+;; same Notification event also fires when the input prompt merely goes idle for
+;; a minute, which is exactly when Claude has just finished (D57).  Resumed
+;; transcript activity, or the file's deletion, clears the flag.
 (defvar-local tincan--notify-watch nil
   "File-notify descriptor for this buffer's .notify status file, or nil.")
 
@@ -933,11 +955,30 @@ any incomplete trailing line so a later chunk completes it."
 
 (defun tincan--notify-file (session-id)
   "Return the notify status file the hook writes for SESSION-ID.
-Mirrors tincan.py's notify_status_path."
+Mirrors tincan.py's notify_status_path: two lines, the notification's kind
+followed by the original message."
   (expand-file-name (concat session-id ".notify") (tincan--state-directory)))
 
+(defun tincan--notify-kind (file)
+  "Return the kind of the notification in FILE: `permission' or `idle'.
+The hook writes the kind on the first line and the original message on the
+second.  A file written by a pre-D57 hook holds the raw message on line 1, so
+that wording is recognized too, and anything unrecognized counts as a
+permission prompt - a spurious flag is a nuisance, a missed one is a hang."
+  (condition-case nil
+      (with-temp-buffer
+        (insert-file-contents file)
+        (let ((first (buffer-substring-no-properties
+                      (point-min) (line-end-position))))
+          (cond ((equal first "idle") 'idle)
+                ((equal first "permission") 'permission)
+                ((string-match-p "waiting for your input" first) 'idle)
+                (t 'permission))))
+    (error 'permission)))
+
 (defun tincan--setup-notify-watch (session-id)
-  "Watch SESSION-ID's notify file and flag `needs-input' on change.
+  "Watch SESSION-ID's notify file and raise `tincan--needs-input' on a prompt.
+Only a `permission' notification raises the flag; deleting the file clears it.
 Return the watch descriptor, or nil.  Failures are non-fatal: the indicator
 just will not appear if the optional hook is absent or watching is unsupported."
   (let* ((file (tincan--notify-file session-id))
@@ -951,11 +992,15 @@ just will not appear if the optional hook is absent or watching is unsupported."
           (file-notify-add-watch
            directory '(change)
            (lambda (event)
-             (when (and (memq (nth 1 event) '(created changed renamed))
-                        (equal (file-name-nondirectory (nth 2 event)) basename)
+             (when (and (equal (file-name-nondirectory (nth 2 event)) basename)
                         (buffer-live-p buffer))
-               (with-current-buffer buffer
-                 (tincan--set-state 'needs-input))))))
+               (pcase (nth 1 event)
+                 ((or 'created 'changed 'renamed)
+                  (when (eq (tincan--notify-kind (nth 2 event)) 'permission)
+                    (with-current-buffer buffer (tincan--set-needs-input t))))
+                 ('deleted
+                  (with-current-buffer buffer
+                    (tincan--set-needs-input nil))))))))
       (error nil))))
 
 ;; ** Buffer identity: header lines and faces
@@ -982,7 +1027,7 @@ just will not appear if the optional hook is absent or watching is unsupported."
   "Header-line content for a tincan view buffer (identity plus agent state)."
   (concat (propertize " tincan view " 'face 'tincan-header-view)
           (propertize " read-only transcript" 'face 'tincan-header-dim)
-          (tincan--state-string tincan--state)
+          (tincan--indicator)
           (when tincan--emphasis-suppressed
             (propertize " [no emphasis]" 'face 'tincan-header-dim))))
 
@@ -1361,6 +1406,8 @@ title (hence the name) can change; BUFFER-NAME names a freshly created one."
           ;; A reused buffer may carry state from a dead follower (D47).
           (setq-local tincan--pending-output "")
           (setq-local tincan--emphasis-suppressed nil)
+          (setq-local tincan--needs-input nil)
+          (setq-local mode-line-process '((:eval (tincan--indicator))))
           (tincan--set-state 'working)
           (add-hook 'kill-buffer-hook #'tincan--cleanup nil t)
           ;; --wait so the follower tolerates a just-started session whose
@@ -1791,24 +1838,26 @@ there is no session picking and no possible mislink."
         (select-window window)))))
 
 ;;;###autoload
-(defun tincan-reply ()
+(defun tincan-reply (&optional force)
   "Compose a reply to this session's Claude (D34).
-Run from the view or the terminal.  When Claude is waiting for input, surface
-the terminal instead of composing; otherwise open a compose buffer.  Composing
-is never blocked - the \"still working, send anyway?\" check happens at send time
+Run from the view or the terminal.  When Claude is blocked on a prompt in the
+terminal, surface the terminal instead of composing; FORCE
+\(\\[universal-argument]) composes anyway.  Composing is otherwise never
+blocked - the \"still working, send anyway?\" check happens at send time
 \(`tincan-compose-send')."
-  (interactive)
+  (interactive "P")
   (let* ((target (tincan--resolve-target))
          (view (car target))
          (terminal (cdr target)))
     (unless (buffer-live-p terminal)
       (user-error "tincan: no terminal linked (use M-x tincan-attach)"))
-    (if (eq (and (buffer-live-p view)
-                 (buffer-local-value 'tincan--state view))
-            'needs-input)
+    (if (and (not force)
+             (buffer-live-p view)
+             (buffer-local-value 'tincan--needs-input view))
         (progn
           (tincan--display-terminal terminal 'select)
-          (message "Claude is waiting for input - answer in the terminal"))
+          (message "Claude is waiting for input - answer in the terminal (C-u %s composes anyway)"
+                   (substitute-command-keys "\\[tincan-reply]")))
       (tincan--open-compose view terminal))))
 
 ;; ** Compose buffer

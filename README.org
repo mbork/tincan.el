@@ -63,7 +63,8 @@ Commands:
   current title (picks up a =/rename=)
 
 Keys - view:
-- =C-c SPC= / =r= - reply (compose buffer; jumps to the terminal when Claude waits)
+- =C-c SPC= / =r= - reply (compose buffer; jumps to the terminal when Claude waits,
+  =C-u= composes anyway)
 - =C-c o= / =t= - go to the terminal, in this window; =C-u= - separate window
 - =C-c k= - close the session (ends Claude in the terminal)
 - =C-c 0= - delete the terminal window
@@ -193,9 +194,10 @@ Helm and Vertico (with =orderless=) match anywhere out of the box, while vanilla
 directory in the middle of a candidate.
 
 The header line shows the agent's state: =[working]=, =[idle]= (after a =@@@ DONE=
-turn-end marker, derived from Claude Code's =turn_duration= record), and - if the
-optional hook below is installed - =[needs input]= when Claude is waiting for you
-in the terminal.
+turn-end marker, derived from Claude Code's =turn_duration= record).  If the
+optional hook below is installed, =[needs input]= is appended when Claude is
+blocked on a prompt in the terminal - a separate, out-of-band signal, so it sits
+next to =[working]=/=[idle]= rather than replacing it.
 
 =M-x tincan-view= renders through =tincan-render-buffer=, which uses =markdown-mode=
 (or =gfm-mode=) when available - including native, per-language fontification of
@@ -250,13 +252,19 @@ Relevant options (=M-x customize-group RET tincan RET=):
 
 ** Knowing when Claude wants your input (optional)
 
-When Claude pauses for a tool-permission prompt (or sits idle waiting for a
-prompt), nothing is written to the transcript - that prompt is terminal-only
-UI - so the viewer cannot show it on its own.  To surface it, tincan can install
-an optional Claude Code =Notification= hook that writes a small per-session file
-at =<config-dir>/tincan/<session-id>.notify=; the view watches that file and
-shows =[needs input]= in the header line.  The hook only signals that Claude
-wants you - you still answer the prompt in the terminal.
+When Claude pauses for a tool-permission prompt, nothing is written to the
+transcript - that prompt is terminal-only UI - so the viewer cannot show it on
+its own.  To surface it, tincan can install an optional Claude Code
+=Notification= hook that writes a small per-session file at
+=<config-dir>/tincan/<session-id>.notify=; the view watches that file and shows
+=[needs input]= in the header line.  The hook only signals that Claude wants
+you - you still answer the prompt in the terminal.
+
+The same =Notification= event also fires when the input prompt merely goes idle
+for about a minute - i.e. right after Claude finishes - so the hook classifies
+it and writes the kind on the file's first line; only a permission prompt raises
+=[needs input]=.  Wording it does not recognize counts as a permission prompt: a
+spurious flag is a nuisance, a missed one is a hang.
 
 Install (and uninstall) it from Emacs:
 

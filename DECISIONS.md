@@ -1201,3 +1201,28 @@ disagreement rather than adding one.  The principled fix is bigger and deferred:
 record true record boundaries as text properties at insert time - `tincan--filter'
 already splits on `RECORD_SEPARATOR' and throws the boundaries away - which would
 also harden autofold, hiding and state scanning against the same forgery.
+
+State.  Claude Code's `Notification' event has two triggers: a tool-permission
+prompt, and the input prompt sitting idle for about a minute.  The second fires
+precisely when Claude has finished and you have not typed yet - during
+diagnosis, 9 of 11 notify files ever written on this machine were the idle kind.
+The watcher flagged on the mere existence of a write and discarded the message,
+so the two were indistinguishable, and nothing ever cleared the flag: its only
+other writer runs on newly arriving transcript output, of which a finished turn
+produces none.  Since `tincan-reply' was gated on exactly that state, the flag
+could only be cleared by doing the thing it blocked.
+So the hook now classifies the event and writes the kind on the file's first
+line, the original message on the second.  Classification is a match on English
+prose from Claude Code, which is fragile in principle - which is exactly why
+unrecognized wording falls back to "permission": a spurious flag is a nuisance,
+a missed one is a hang.  A file in the pre-D57 one-line format is still read
+correctly for the same reason.
+The flag also moves out of `tincan--state' into `tincan--needs-input'.  A
+transcript-derived state and an out-of-band signal cannot share a variable
+without clobbering each other, and they clobbered in both directions: a
+notification erased `idle', and any transcript line erased the prompt.  Kept
+apart, `tincan--indicator' composes both, so the header reads `[idle] [needs
+input]' rather than one of the two, and deleting the notify file clears the flag
+on its own.  `tincan-reply' gains the escape hatch it should always have had:
+`C-u' composes despite a terminal prompt, mirroring `tincan-refontify''s FORCE
+convention.

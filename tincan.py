@@ -648,13 +648,27 @@ def get_tincan_state_dir():
     return get_config_dir() / "tincan"
 
 def notify_status_path(session_id):
+    # A two-line file: the notification's kind ("permission" or "idle") on the
+    # first line, the original message on the second.  Emacs reads the kind and
+    # ignores idle ones (D57); the message is kept for debugging.
     return get_tincan_state_dir() / (session_id + ".notify")
+
+def classify_notification(message):
+    # The Notification event fires both for a tool-permission prompt and for
+    # the input prompt going idle for ~60s; only the first means Claude is
+    # actually blocked on the user.  Unknown wording is treated as a
+    # permission prompt: a spurious flag is a nuisance, a missed one is a
+    # hang.
+    text = (message or "").lower()
+    if "waiting for your input" in text:
+        return "idle"
+    return "permission"
 
 def run_notification_hook():
     # Invoked as a Claude Code "Notification" hook; the event JSON arrives on
-    # stdin.  Write the message to a small per-session file so Emacs can show
-    # that Claude is waiting for input.  Must never disrupt Claude Code, so any
-    # problem is swallowed silently.
+    # stdin.  Write the kind and the message to a small per-session file so
+    # Emacs can show that Claude is waiting for input.  Must never disrupt
+    # Claude Code, so any problem is swallowed silently.
     try:
         event = json.loads(sys.stdin.read())
     except (ValueError, OSError):
@@ -666,7 +680,8 @@ def run_notification_hook():
     try:
         path = notify_status_path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(message + "\n", encoding="utf-8")
+        path.write_text(classify_notification(message) + "\n" + message + "\n",
+                        encoding="utf-8")
     except OSError:
         return
 
